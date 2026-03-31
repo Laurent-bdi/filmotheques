@@ -479,7 +479,7 @@ async function addFilmToDatabase(movie) {
     } catch (e) {
       console.error('Insert error:', e);
       setDbStatus('error');
-      showToast('Erreur lors de l'ajout', true);
+      showToast("Erreur lors de l'ajout", true);
       return;
     }
   }
