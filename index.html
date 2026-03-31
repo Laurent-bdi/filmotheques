@@ -1,0 +1,719 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Ma Filmothèque</title>
+<link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<style>
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --bg:#0a0a0f;--card:#13131a;--card-hover:#1a1a25;
+  --gold:#d4a843;--gold-dim:#a07830;
+  --text:#ffffff;--text-dim:#e0e0e0;--text-dark:#cccccc;
+  --accent:#c53030;--accent2:#2b6cb0;
+  --green:#38a169;--green-bg:rgba(56,161,105,.12);
+  --border:#222;--radius:10px;
+}
+html{scroll-behavior:smooth}
+body{font-family:'Inter',sans-serif;background:var(--bg);color:var(--text);min-height:100vh;line-height:1.5}
+
+.loading-screen{position:fixed;inset:0;z-index:9999;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;transition:opacity .5s}
+.loading-screen.hidden{opacity:0;pointer-events:none}
+.loading-spinner{width:40px;height:40px;border:3px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:16px}
+@keyframes spin{to{transform:rotate(360deg)}}
+.loading-screen p{color:var(--text-dim);font-size:.9rem}
+
+.db-status{position:fixed;bottom:16px;right:16px;z-index:300;display:flex;gap:6px;align-items:center;padding:8px 14px;background:var(--card);border:1px solid var(--border);border-radius:20px;font-size:.7rem;color:var(--text-dim);opacity:.7;transition:.3s;cursor:pointer}
+.db-status:hover{opacity:1}
+.db-dot{width:8px;height:8px;border-radius:50%;background:var(--green)}
+.db-dot.saving{background:var(--gold);animation:pulse 1s infinite}
+.db-dot.error{background:var(--accent)}
+.db-dot.offline{background:#666}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+.hero{position:relative;padding:48px 32px 28px;background:linear-gradient(180deg,#14121a 0%,var(--bg) 100%);border-bottom:1px solid var(--border);text-align:center}
+.hero h1{font-family:'Bebas Neue',sans-serif;font-size:clamp(2.6rem,6vw,4.2rem);letter-spacing:4px;color:var(--gold);margin-bottom:4px}
+.hero .sub{font-size:.95rem;color:var(--text-dim);font-weight:300}
+.stats-bar{display:flex;gap:28px;justify-content:center;margin-top:18px;flex-wrap:wrap}
+.stat{text-align:center}
+.stat .num{font-family:'Bebas Neue',sans-serif;font-size:1.7rem;color:var(--gold)}
+.stat .label{font-size:.72rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1.5px}
+.db-tables-info{display:flex;gap:14px;justify-content:center;margin-top:14px;flex-wrap:wrap}
+.db-table-badge{padding:3px 10px;background:rgba(212,168,67,.08);border:1px solid rgba(212,168,67,.15);border-radius:14px;font-size:.65rem;color:var(--gold);letter-spacing:.5px}
+
+.toolbar{position:sticky;top:0;z-index:100;background:rgba(10,10,15,.92);backdrop-filter:blur(16px);padding:14px 24px;border-bottom:1px solid var(--border);display:flex;flex-wrap:wrap;gap:10px;align-items:center}
+.search-box{flex:1;min-width:200px;position:relative}
+.search-box input{width:100%;padding:10px 14px 10px 38px;background:#1a1a25;border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;outline:none;transition:.2s}
+.search-box input:focus{border-color:var(--gold)}
+.search-box svg{position:absolute;left:12px;top:50%;transform:translateY(-50%);color:var(--text-dim)}
+.filter-btn{padding:8px 16px;background:#1a1a25;border:1px solid var(--border);border-radius:var(--radius);color:var(--text-dim);font-size:.82rem;cursor:pointer;transition:.2s;display:flex;align-items:center;gap:6px;white-space:nowrap}
+.filter-btn:hover{border-color:var(--gold);color:var(--text)}
+.filter-btn.active{background:var(--gold);color:#000;border-color:var(--gold);font-weight:600}
+.filter-btn .count{background:rgba(255,255,255,.15);padding:1px 7px;border-radius:10px;font-size:.72rem}
+.filter-btn.active .count{background:rgba(0,0,0,.2)}
+.sort-select{padding:8px 12px;background:#1a1a25;border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.82rem;cursor:pointer;outline:none}
+.sort-select option{background:#1a1a25;color:var(--text)}
+.add-btn{padding:8px 18px;background:var(--gold);border:none;border-radius:var(--radius);color:#000;font-size:.82rem;font-weight:600;cursor:pointer;transition:.2s;display:flex;align-items:center;gap:6px}
+.add-btn:hover{background:#e8bc55;transform:scale(1.03)}
+.add-btn:disabled{opacity:.5;cursor:not-allowed;transform:none}
+
+.filter-panel{display:none;background:var(--card);border:1px solid var(--border);border-radius:var(--radius);padding:20px 24px;margin:12px 24px;animation:slideDown .25s ease}
+.filter-panel.open{display:block}
+@keyframes slideDown{from{opacity:0;transform:translateY(-8px)}to{opacity:1;transform:translateY(0)}}
+.filter-group{margin-bottom:16px}
+.filter-group label{font-size:.78rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;display:block;margin-bottom:6px}
+.filter-tags{display:flex;flex-wrap:wrap;gap:6px}
+.filter-tag{padding:5px 12px;background:#1a1a25;border:1px solid var(--border);border-radius:20px;color:var(--text-dim);font-size:.78rem;cursor:pointer;transition:.2s}
+.filter-tag:hover{border-color:var(--gold);color:var(--text)}
+.filter-tag.selected{background:var(--gold);color:#000;border-color:var(--gold);font-weight:500}
+.clear-filters{padding:6px 14px;background:transparent;border:1px solid var(--accent);border-radius:var(--radius);color:var(--accent);font-size:.78rem;cursor:pointer;transition:.2s;margin-top:8px}
+.clear-filters:hover{background:var(--accent);color:#fff}
+
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:22px;padding:24px}
+.card{background:var(--card);border-radius:var(--radius);overflow:hidden;border:1px solid transparent;transition:.3s;position:relative;cursor:pointer}
+.card:hover{border-color:var(--gold);transform:translateY(-4px);box-shadow:0 12px 40px rgba(0,0,0,.5)}
+.card.seen{opacity:.75}
+.card.seen .seen-badge{display:flex}
+.seen-badge{display:none;position:absolute;top:10px;right:10px;z-index:5;background:var(--green);color:#fff;width:28px;height:28px;border-radius:50%;align-items:center;justify-content:center;font-size:.8rem;box-shadow:0 2px 8px rgba(56,161,105,.4)}
+.card-poster{width:100%;aspect-ratio:2/3;object-fit:cover;display:block;background:#1a1a25}
+.no-poster{width:100%;aspect-ratio:2/3;display:flex;align-items:center;justify-content:center;background:#1a1a25;font-size:2.5rem}
+.card-body{padding:12px 14px 16px}
+.card-title{font-family:'Bebas Neue',sans-serif;font-size:1.05rem;color:var(--text);letter-spacing:.5px;line-height:1.2;margin-bottom:4px}
+.card-year{font-size:.75rem;color:var(--gold);margin-bottom:6px}
+.card-director{font-size:.75rem;color:var(--text-dim);margin-bottom:3px}
+.card-director span{color:var(--text)}
+.card-actors{font-size:.72rem;color:var(--text-dim);margin-bottom:6px}
+.card-genres{display:flex;flex-wrap:wrap;gap:4px}
+.card-genre{padding:2px 8px;background:rgba(212,168,67,.1);border:1px solid rgba(212,168,67,.2);border-radius:12px;font-size:.65rem;color:var(--gold)}
+
+.modal-overlay{display:none;position:fixed;inset:0;z-index:200;background:rgba(0,0,0,.85);backdrop-filter:blur(8px);align-items:center;justify-content:center;padding:20px}
+.modal-overlay.open{display:flex}
+.modal{background:var(--card);border-radius:14px;max-width:700px;width:100%;max-height:90vh;overflow-y:auto;border:1px solid var(--border);animation:modalIn .3s ease}
+@keyframes modalIn{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+.modal-header{display:flex;gap:20px;padding:24px 24px 16px;align-items:flex-start}
+.modal-poster{width:160px;border-radius:8px;flex-shrink:0}
+.modal-info{flex:1}
+.modal-info h2{font-family:'Bebas Neue',sans-serif;font-size:1.8rem;color:var(--gold);letter-spacing:1px;line-height:1.15}
+.modal-info .meta{font-size:.85rem;color:var(--text-dim);margin:6px 0 12px}
+.modal-info .meta span{color:var(--text)}
+.modal-genres-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:12px}
+.modal-genre-tag{padding:4px 12px;background:rgba(212,168,67,.12);border:1px solid rgba(212,168,67,.25);border-radius:16px;font-size:.78rem;color:var(--gold)}
+.modal-body{padding:0 24px 24px}
+.modal-body h3{font-size:.85rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1.5px;margin-bottom:8px}
+.modal-overview{font-size:.9rem;color:var(--text);line-height:1.7;margin-bottom:18px}
+.modal-cast{display:flex;gap:16px;flex-wrap:wrap;margin-bottom:18px}
+.modal-cast-item{font-size:.85rem;color:var(--text);padding:6px 14px;background:#1a1a25;border-radius:8px}
+.modal-actions{display:flex;gap:10px;flex-wrap:wrap}
+.btn-seen{padding:10px 22px;border-radius:var(--radius);font-size:.85rem;font-weight:600;cursor:pointer;transition:.2s;border:none;display:flex;align-items:center;gap:8px}
+.btn-seen.not-seen{background:var(--green);color:#fff}
+.btn-seen.already-seen{background:#1a1a25;color:var(--green);border:1px solid var(--green)}
+.btn-seen:hover{transform:scale(1.03)}
+.btn-close{padding:10px 22px;background:#1a1a25;border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.85rem;cursor:pointer;transition:.2s}
+.btn-close:hover{border-color:var(--text)}
+.btn-delete{padding:10px 22px;background:transparent;border:1px solid var(--accent);border-radius:var(--radius);color:var(--accent);font-size:.85rem;cursor:pointer;transition:.2s}
+.btn-delete:hover{background:var(--accent);color:#fff}
+
+.add-modal{background:var(--card);border-radius:14px;max-width:550px;width:100%;padding:28px;border:1px solid var(--border);animation:modalIn .3s ease;max-height:90vh;overflow-y:auto}
+.add-modal h2{font-family:'Bebas Neue',sans-serif;font-size:1.5rem;color:var(--gold);letter-spacing:2px;margin-bottom:6px}
+.add-modal .add-sub{font-size:.8rem;color:var(--text-dim);margin-bottom:18px}
+.field{margin-bottom:14px}
+.field label{display:block;font-size:.78rem;color:var(--text-dim);text-transform:uppercase;letter-spacing:1px;margin-bottom:4px}
+.field input,.field textarea{width:100%;padding:10px 14px;background:#1a1a25;border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.9rem;outline:none;font-family:inherit}
+.field input:focus,.field textarea:focus{border-color:var(--gold)}
+.field textarea{resize:vertical;min-height:60px}
+.tmdb-results{margin-top:12px;max-height:350px;overflow-y:auto}
+.tmdb-result{display:flex;gap:12px;padding:12px;border-radius:8px;cursor:pointer;transition:.2s;border:1px solid transparent;margin-bottom:6px}
+.tmdb-result:hover{background:#1a1a25;border-color:var(--gold)}
+.tmdb-result img{width:55px;height:82px;object-fit:cover;border-radius:4px;flex-shrink:0}
+.tmdb-result .info{flex:1}
+.tmdb-result .info h4{font-size:.9rem;color:var(--text);margin-bottom:2px}
+.tmdb-result .info p{font-size:.75rem;color:var(--text-dim);line-height:1.4}
+.tmdb-result .info .yr{color:var(--gold);font-weight:500}
+.tmdb-searching{text-align:center;padding:20px;color:var(--text-dim);font-size:.85rem}
+.mini-spin{display:inline-block;width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--gold);border-radius:50%;animation:spin .6s linear infinite;vertical-align:middle;margin-right:8px}
+.manual-toggle{font-size:.78rem;color:var(--gold);cursor:pointer;text-decoration:underline;margin-top:8px;display:inline-block}
+.manual-fields{display:none;margin-top:14px}
+.manual-fields.open{display:block}
+.btn-row{display:flex;gap:10px;margin-top:14px}
+.empty-state{text-align:center;padding:80px 20px;display:none}
+.empty-state p{color:var(--text-dim);font-size:1rem}
+.toast{position:fixed;bottom:60px;left:50%;transform:translateX(-50%) translateY(20px);z-index:400;padding:12px 24px;background:var(--green);color:#fff;border-radius:var(--radius);font-size:.85rem;font-weight:500;opacity:0;transition:.3s;pointer-events:none}
+.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.toast.error{background:var(--accent)}
+.config-banner{background:rgba(212,168,67,.1);border:1px solid var(--gold);border-radius:var(--radius);padding:16px 24px;margin:16px 24px;display:none}
+.config-banner.show{display:block}
+.config-banner h3{font-family:'Bebas Neue',sans-serif;color:var(--gold);font-size:1.1rem;margin-bottom:8px}
+.config-banner p{font-size:.85rem;color:var(--text-dim);margin-bottom:10px}
+.config-banner input{width:100%;padding:8px 12px;background:#1a1a25;border:1px solid var(--border);border-radius:var(--radius);color:var(--text);font-size:.85rem;outline:none;margin-bottom:8px}
+.config-banner button{padding:8px 16px;background:var(--gold);border:none;border-radius:var(--radius);color:#000;font-weight:600;font-size:.82rem;cursor:pointer}
+
+@media(max-width:768px){
+  .grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:14px;padding:14px}
+  .toolbar{padding:10px 14px}
+  .modal-header{flex-direction:column;align-items:center;text-align:center}
+  .modal-poster{width:120px}
+  .hero{padding:32px 20px 20px}
+}
+@media(max-width:480px){.grid{grid-template-columns:repeat(2,1fr);gap:10px;padding:10px}}
+::-webkit-scrollbar{width:6px}::-webkit-scrollbar-track{background:var(--bg)}::-webkit-scrollbar-thumb{background:#333;border-radius:3px}
+</style>
+</head>
+<body>
+
+<div class="loading-screen" id="loadingScreen">
+  <div class="loading-spinner"></div>
+  <p id="loadingText">Connexion à la base de données…</p>
+</div>
+<div class="db-status" id="dbStatus" onclick="toggleConfigBanner()">
+  <div class="db-dot" id="dbDot"></div>
+  <span id="dbLabel">…</span>
+</div>
+<div class="toast" id="toast"></div>
+
+<div class="config-banner" id="configBanner">
+  <h3>⚙️ Configuration Supabase</h3>
+  <p>Entre tes identifiants Supabase (voir Settings → API dans ton projet)</p>
+  <input type="text" id="cfgUrl" placeholder="Project URL : https://xxxxx.supabase.co">
+  <input type="text" id="cfgKey" placeholder="Clé anon (public) : eyJhbG...">
+  <button onclick="saveConfig()">Connecter</button>
+  <p style="margin-top:8px;font-size:.75rem">Ces infos sont stockées dans ton navigateur uniquement.</p>
+</div>
+
+<div class="hero">
+  <h1>🎬 Ma Filmothèque</h1>
+  <p class="sub">Base de données relationnelle — Supabase / PostgreSQL</p>
+  <div class="stats-bar">
+    <div class="stat"><div class="num" id="totalCount">0</div><div class="label">Films</div></div>
+    <div class="stat"><div class="num" id="seenCount">0</div><div class="label">Vus</div></div>
+    <div class="stat"><div class="num" id="unseenCount">0</div><div class="label">À voir</div></div>
+    <div class="stat"><div class="num" id="directorCount">0</div><div class="label">Réalisateurs</div></div>
+  </div>
+  <div class="db-tables-info" id="dbTablesInfo"></div>
+</div>
+
+<div class="toolbar">
+  <div class="search-box">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input type="text" id="searchInput" placeholder="Rechercher un film, acteur, réalisateur...">
+  </div>
+  <button class="filter-btn" id="toggleFilters">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+    Filtres <span class="count" id="filterCount">0</span>
+  </button>
+  <button class="filter-btn" id="btnSeenFilter">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+    Tous
+  </button>
+  <select class="sort-select" id="sortSelect">
+    <option value="alpha">A → Z</option>
+    <option value="alpha-desc">Z → A</option>
+    <option value="year-desc">Année ↓</option>
+    <option value="year-asc">Année ↑</option>
+    <option value="director">Réalisateur</option>
+  </select>
+  <button class="add-btn" id="addFilmBtn">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="5" x2="12" y2="19"/><line x1="5" y1="12" x2="19" y2="12"/></svg>
+    Ajouter un film
+  </button>
+</div>
+
+<div class="filter-panel" id="filterPanel">
+  <div class="filter-group"><label>Genres</label><div class="filter-tags" id="genreFilters"></div></div>
+  <div class="filter-group"><label>Réalisateurs</label><div class="filter-tags" id="directorFilters"></div></div>
+  <div class="filter-group"><label>Acteurs</label><div class="filter-tags" id="actorFilters"></div></div>
+  <button class="clear-filters" id="clearFilters">✕ Effacer tous les filtres</button>
+</div>
+
+<div class="grid" id="filmGrid"></div>
+<div class="empty-state" id="emptyState"><p>Aucun film ne correspond à vos filtres</p></div>
+
+<div class="modal-overlay" id="detailModal"><div class="modal" id="modalContent"></div></div>
+
+<div class="modal-overlay" id="addModal">
+  <div class="add-modal">
+    <h2>Ajouter un film</h2>
+    <p class="add-sub">Recherchez sur TMDB pour importer automatiquement les données</p>
+    <div class="field"><label>Rechercher sur TMDB</label><input type="text" id="tmdbSearchInput" placeholder="Tapez un titre de film…" autocomplete="off"></div>
+    <div class="tmdb-results" id="tmdbResults"></div>
+    <span class="manual-toggle" id="manualToggle">✏️ Saisie manuelle</span>
+    <div class="manual-fields" id="manualFields">
+      <div class="field"><label>Titre</label><input type="text" id="addTitle"></div>
+      <div class="field"><label>Poster URL</label><input type="text" id="addPoster" placeholder="https://image.tmdb.org/..."></div>
+      <div class="field"><label>Année</label><input type="text" id="addYear"></div>
+      <div class="field"><label>Réalisateur</label><input type="text" id="addDirector"></div>
+      <div class="field"><label>Acteurs (virgules)</label><input type="text" id="addActors"></div>
+      <div class="field"><label>Genres (virgules)</label><input type="text" id="addGenres"></div>
+      <div class="field"><label>Résumé</label><textarea id="addOverview" rows="3"></textarea></div>
+      <div class="btn-row"><button class="add-btn" id="confirmManualAdd">Ajouter</button></div>
+    </div>
+    <div class="btn-row"><button class="btn-close" id="cancelAdd">Fermer</button></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════════
+// CONFIGURATION — Remplace avec tes valeurs Supabase
+// ═══════════════════════════════════════════════
+const DEFAULT_SUPABASE_URL = 'https://VOTRE_URL.supabase.co';
+const DEFAULT_SUPABASE_KEY = 'VOTRE_CLE_ANON';
+
+// ── Config management ──
+function getConfig() {
+  const saved = localStorage.getItem('filmo_supabase_config');
+  if (saved) { try { return JSON.parse(saved); } catch {} }
+  return { url: DEFAULT_SUPABASE_URL, key: DEFAULT_SUPABASE_KEY };
+}
+function isConfigured() {
+  const c = getConfig();
+  return c.url && c.key && !c.url.includes('VOTRE_') && !c.key.includes('VOTRE_');
+}
+function saveConfig() {
+  const url = document.getElementById('cfgUrl').value.trim().replace(/\/$/, '');
+  const key = document.getElementById('cfgKey').value.trim();
+  if (!url || !key) { showToast('URL et clé requises', true); return; }
+  localStorage.setItem('filmo_supabase_config', JSON.stringify({ url, key }));
+  document.getElementById('configBanner').classList.remove('show');
+  showToast('Configuration sauvegardée ! Rechargement…');
+  setTimeout(() => location.reload(), 1000);
+}
+function toggleConfigBanner() {
+  const b = document.getElementById('configBanner');
+  b.classList.toggle('show');
+  if (b.classList.contains('show')) {
+    const c = getConfig();
+    document.getElementById('cfgUrl').value = c.url.includes('VOTRE_') ? '' : c.url;
+    document.getElementById('cfgKey').value = c.key.includes('VOTRE_') ? '' : c.key;
+  }
+}
+
+// ── Supabase client ──
+let sb = null;
+let useSupabase = false;
+
+// ── In-memory cache ──
+let cache = { films: [], genres: {}, directors: {}, actors: {}, posters: {}, film_genres: [], film_actors: [], film_directors: [] };
+
+// ── DB status UI ──
+function setDbStatus(status, label) {
+  const dot = document.getElementById('dbDot');
+  const lbl = document.getElementById('dbLabel');
+  dot.className = 'db-dot' + (status==='saving'?' saving':'') + (status==='error'?' error':'') + (status==='offline'?' offline':'');
+  lbl.textContent = label || ({saving:'Sauvegarde…', error:'Erreur DB', offline:'Mode local', ok:'Supabase connectée'}[status] || '…');
+}
+function showToast(msg, isError) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.className = 'toast show' + (isError ? ' error' : '');
+  setTimeout(() => t.className = 'toast', 2500);
+}
+
+// ═══════════════════════════════════════════
+// DATA LAYER — Supabase or local fallback
+// ═══════════════════════════════════════════
+
+async function loadAllData() {
+  if (!isConfigured()) {
+    document.getElementById('loadingText').textContent = 'Mode local (Supabase non configuré)…';
+    setDbStatus('offline', 'Cliquer pour configurer');
+    document.getElementById('configBanner').classList.add('show');
+    return loadFallbackData();
+  }
+
+  try {
+    const cfg = getConfig();
+    sb = supabase.createClient(cfg.url, cfg.key);
+    document.getElementById('loadingText').textContent = 'Chargement depuis Supabase…';
+
+    const [rFilms, rGenres, rDirectors, rActors, rPosters, rFG, rFA, rFD] = await Promise.all([
+      sb.from('films').select('*'),
+      sb.from('genres').select('*'),
+      sb.from('directors').select('*'),
+      sb.from('actors').select('*'),
+      sb.from('posters').select('*'),
+      sb.from('film_genres').select('*'),
+      sb.from('film_actors').select('*').order('cast_order'),
+      sb.from('film_directors').select('*'),
+    ]);
+
+    if (rFilms.error) throw rFilms.error;
+
+    // Build lookup maps
+    cache.genres = {}; (rGenres.data||[]).forEach(g => cache.genres[g.id] = g.name);
+    cache.directors = {}; (rDirectors.data||[]).forEach(d => cache.directors[d.id] = d.name);
+    cache.actors = {}; (rActors.data||[]).forEach(a => cache.actors[a.id] = a.name);
+    cache.posters = {}; (rPosters.data||[]).forEach(p => cache.posters[p.film_id] = p.url);
+    cache.film_genres = rFG.data || [];
+    cache.film_actors = rFA.data || [];
+    cache.film_directors = rFD.data || [];
+
+    // Enrich films
+    cache.films = (rFilms.data||[]).map(f => ({
+      ...f,
+      poster: cache.posters[f.id] || '',
+      genres: cache.film_genres.filter(fg=>fg.film_id===f.id).map(fg=>cache.genres[fg.genre_id]).filter(Boolean),
+      director: (() => { const l = cache.film_directors.find(fd=>fd.film_id===f.id); return l ? cache.directors[l.director_id]||'' : ''; })(),
+      actors: cache.film_actors.filter(fa=>fa.film_id===f.id).map(fa=>cache.actors[fa.actor_id]).filter(Boolean),
+    }));
+
+    useSupabase = true;
+    setDbStatus('ok');
+    console.log(`Supabase: ${cache.films.length} films loaded`);
+  } catch (e) {
+    console.error('Supabase error, falling back to local:', e);
+    setDbStatus('error', 'Erreur — mode local');
+    showToast('Erreur Supabase, mode local activé', true);
+    return loadFallbackData();
+  }
+}
+
+function loadFallbackData() {
+  const FALLBACK = {"films": {"640": {"id": "640", "title": "Arrête-moi si tu peux", "fr_title": "Arrête-moi si tu peux", "year": "2002", "overview": "Dans les années soixante, le jeune Frank Abagnale Jr. est passé maître dans l’art de l’escroquerie, allant jusqu’à détourner 2,5 millions de dollars et à figurer sur les listes du FBI comme l’un des dix individus les plus recherchés des États‐Unis. Véritable caméléon, Frank revêt des identités aussi diverses que celles de pilote de ligne, de médecin, de professeur d’université ou encore d’assistant du procureur. Carl Hanratty, agent du FBI à l’apparence stricte, fait de la traque de Frank Abagnale Jr. sa mission prioritaire, mais ce dernier reste pendant longtemps insaisissable…", "seen": false}, "597": {"id": "597", "title": "Titanic", "fr_title": "Titanic", "year": "1997", "overview": "Southampton, 10 avril 1912. Le paquebot le plus grand et le plus moderne du monde, réputé pour son insubmersibilité, le « Titanic », appareille pour son premier voyage. Quatre jours plus tard, il heurte un iceberg. À son bord, un artiste pauvre et une grande bourgeoise tombent amoureux.", "seen": false}, "106646": {"id": "106646", "title": "Le Loup de Wall Street", "fr_title": "Le Loup de Wall Street", "year": "2013", "overview": "Sa licence de courtier en poche, et les narines déjà pleines de cocaïne, Jordan Belfort est prêt à conquérir Wall Street. Ce jour d'octobre, un krach, le plus important depuis 1929, vient piétiner ses rêves de grandeur. C'est finalement à Long Island qu'il échoue et qu'il monte sa propre affaire de courtage. Son créneau : le hors-cote. Sa méthode : l'arnaque. Son équipe : des vendeurs ou des petits trafiquants.", "seen": false}, "27205": {"id": "27205", "title": "Inception", "fr_title": "Inception", "year": "2010", "overview": "Dom Cobb est un voleur expérimenté, le meilleur dans l'art dangereux de l'extraction, voler les secrets les plus intimes enfouis au plus profond du subconscient durant une phase de rêve, lorsque l'esprit est le plus vulnérable. Les capacités de Cobb ont fait des envieux dans le monde tourmenté de l'espionnage industriel alors qu'il devient fugitif en perdant tout ce qu'il a un jour aimé. Une chance de se racheter lui est alors offerte. Une ultime mission grâce à laquelle il pourrait retrouver sa vie passée mais uniquement s'il parvient à accomplir l'impossible inception.", "seen": false}, "64682": {"id": "64682", "title": "Gatsby le Magnifique", "fr_title": "Gatsby le Magnifique", "year": "2013", "overview": "Printemps 1922. L'époque est propice au relâchement des mœurs, à l'essor du jazz et à l’enrichissement des contrebandiers d’alcool… Apprenti écrivain, Nick Carraway quitte la région du Middle‐West pour s'installer à New York. Voulant sa part du rêve américain, il vit désormais entouré d'un mystérieux millionnaire, Jay Gatsby, qui s'étourdit en fêtes mondaines, et de sa cousine Daisy et de son mari volage, Tom Buchanan, issu de sang noble. C’est ainsi que Nick se retrouve au cœur du monde fascinant des milliardaires, de leurs illusions, de leurs amours et de leurs mensonges. Témoin privilégié de son temps, il se met à écrire une histoire où se mêlent des amours impossibles, des rêves d’absolu et des tragédies ravageuses et, chemin faisant, nous tend un miroir où se reflètent notre époque moderne et ses combats.", "seen": false}, "11324": {"id": "11324", "title": "Shutter Island", "fr_title": "Shutter Island", "year": "2010", "overview": "En 1954, le marshal Teddy Daniels et son coéquipier Chuck Aule sont envoyés enquêter sur l’île de Shutter Island, dans un hôpital psychiatrique où sont internés de dangereux criminels. L’une des patientes, Rachel Solando, a inexplicablement disparu. Comment la meurtrière a‐t‐elle pu sortir d’une cellule fermée de l’extérieur ? Le seul indice retrouvé dans la pièce est une feuille de papier sur laquelle on peut lire une suite de chiffres et de lettres sans signification apparente. Œuvre cohérente d’une malade, ou cryptogramme ?", "seen": false}, "68718": {"id": "68718", "title": "Django Unchained", "fr_title": "Django Unchained", "year": "2012", "overview": "Dans le sud des États‐Unis, deux ans avant la guerre de Sécession, le Dr King Schultz, un chasseur de primes allemand, fait l’acquisition de Django, un esclave qui peut l’aider à traquer les frères Brittle, les meurtriers qu’il recherche. Schultz promet à Django de lui rendre sa liberté lorsqu’il aura capturé les Brittle – morts ou vifs. Alors que les deux hommes pistent les dangereux criminels, Django n’oublie pas que son seul but est de retrouver Broomhilda, sa femme, dont il fut séparé à cause du commerce des esclaves… Lorsque Django et Schultz arrivent dans l’immense plantation du puissant Calvin Candie, ils éveillent les soupçons de Stephen, un esclave qui sert Candie et a toute sa confiance. Le moindre de leurs mouvements est désormais épié par une dangereuse organisation de plus en plus proche… Si Django et Schultz veulent espérer s’enfuir avec Broomhilda, ils vont devoir choisir entre l’indépendance et la solidarité, entre le sacrifice et la survie…", "seen": false}, "1907": {"id": "1907", "title": "La Plage", "fr_title": "La Plage", "year": "2000", "overview": "Richard, jeune Américain, amateur de sensations inédites a choisi l'Asie comme terrain d'élection, dans l'espoir d'y vivre des aventures fortes et exaltantes. Dans un hôtel miteux de Bangkok boudé par les touristes, il fait la connaissance d'un couple de Francais, Françoise et Etienne. Dans la nuit, un homme au regard halluciné fait irruption dans sa chambre et évoque une île secrète, une plage paradisiaque, où il aurait vécu plusieurs années au sein d'une petite communauté d'esprits libres. Le lendemain, Richard retrouve une carte de l'île et le cadavre de Daffy.", "seen": false}, "680": {"id": "680", "title": "Pulp Fiction", "fr_title": "Pulp Fiction", "year": "1994", "overview": "L’odyssée sanglante et burlesque de petits malfrats dans la jungle d’Hollywood : Deux petits tueurs, un dangereux gangster marié à une camée, un boxeur roublard, des prêteurs sur gages sadiques, un caïd élégant et dévoué, un dealer bon mari et deux tourtereaux à la gâchette facile.", "seen": false}, "500": {"id": "500", "title": "Reservoir Dogs", "fr_title": "Reservoir Dogs", "year": "1992", "overview": "Après un hold‐up manqué, des cambrioleurs de haut vol font leurs comptes dans une confrontation violente, pour découvrir lequel d’entre eux les a trahis.", "seen": false}, "24": {"id": "24", "title": "Kill Bill : Volume 1", "fr_title": "Kill Bill : Volume 1", "year": "2003", "overview": "Au cours d'un mariage, un commando armé massacre l'assistance, laissant pour morte la Mariée et l'enfant qu'elle porte. Après 4 ans de coma, la Mariée se lance à la poursuite des assassins, membres du clan de Bill, au sein duquel, sous le pseudonyme de Black Mamba, elle exerça elle-même autrefois ses talents de redoutable tueuse…", "seen": false}, "393": {"id": "393", "title": "Kill Bill : Volume 2", "fr_title": "Kill Bill : Volume 2", "year": "2004", "overview": "Après avoir éliminé ses deux anciennes collègues Vernita Green et O-Ren Ishii, la Mariée, alias Black Mamba, poursuit l'éradication du gang des Vipères Assassines. Prochaines cibles : Budd, puis Elle Driver, avant d'atteindre enfin son but ultime : tuer leur chef, Bill…", "seen": false}, "16869": {"id": "16869", "title": "Inglourious Basterds", "fr_title": "Inglourious Basterds", "year": "2009", "overview": "Dans la France occupée de 1940, un groupe de soldats juifs américains, les bâtards, mène des actions punitives particulièrement sanglantes contre les nazis du Troisième Reich. Leur chemin rencontre celui de Shosanna Dreyfus, une jeune juive réfugiée à Paris exploitante d'une salle de cinéma qui entend elle aussi assouvir sa propre vengeance envers les nazis.", "seen": false}, "550": {"id": "550", "title": "Fight Club", "fr_title": "Fight Club", "year": "1999", "overview": "Le narrateur, sans identité précise, vit seul, travaille seul, dort seul, mange seul ses plateaux‐repas pour une personne comme beaucoup d’autres personnes seules qui connaissent la misère humaine, morale et sexuelle. C’est pourquoi il va devenir membre du Fight club, un lieu clandestin où il va pouvoir retrouver sa virilité, l’échange et la communication. Ce club est dirigé par Tyler Durden, une sorte d’anarchiste entre gourou et philosophe qui prêche l’amour de son prochain.", "seen": false}, "297": {"id": "297", "title": "Rencontre avec Joe Black", "fr_title": "Rencontre avec Joe Black", "year": "1998", "overview": "Une nuit, le magnat William Parrish ressent une violente douleur tandis qu'une voix surgissant des ténèbres lui annonce sa mort prochaine. À ce moment-là, un jeune inconnu se présente à son domicile pour l'accompagner vers son dernier voyage. Ce messager de l'au-delà impose à Parrish de l'héberger chez lui afin de lui donner l'occasion de partager un temps les expériences, les joies, les émotions et les drames des vivants, qui semblent lui être étrangers. En l'espace de trois jours, Joe Black révèlera toute la famille Parrish à elle-même.", "seen": false}, "807": {"id": "807", "title": "Seven", "fr_title": "Seven", "year": "1995", "overview": "À New York, un criminel anonyme a décidé de commettre 7 meurtres basés sur les 7 pêchés capitaux énoncés dans la Bible : gourmandise, avarice, paresse, orgueil, luxure, envie et colère. Vieux flic blasé à 7 jours de la retraite, l'inspecteur Somerset mène l'enquête tout en formant son remplaçant, l'ambitieux inspecteur David Mills…", "seen": false}, "2649": {"id": "2649", "title": "The Game", "fr_title": "The Game", "year": "1997", "overview": "Nicholas Van Orton, homme d'affaires avisé, reçoit le jour de son anniversaire un étrange cadeau que lui offre son frère Conrad. Il s'agit d'un jeu. Nicholas découvre peu à peu que les enjeux en sont très élevés, bien qu'il ne soit certain ni des règles, ni même de l'objectif réel. Il prend peu à peu conscience qu'il est manipulé jusque dans sa propre maison par des conspirateurs inconnus qui semblent vouloir faire voler sa vie en éclats.", "seen": false}, "348": {"id": "348", "title": "Alien, le huitième passager", "fr_title": "Alien", "year": "1979", "overview": "En 2122, le Nostromo, vaisseau de commerce, fait route vers la Terre avec à son bord un équipage de sept personnes en hibernation et une cargaison de minerais. Il interrompt soudain sa course suite à la réception d’un mystérieux message provenant d’une planète inexplorée. Réveillé par l’ordinateur de bord, l’équipage se rend sur place et découvre les restes d’un gigantesque vaisseau extraterrestre dont le seul passager semble être mort dans d’étranges circonstances…", "seen": false}, "98": {"id": "98", "title": "Gladiator", "fr_title": "Gladiator", "year": "2000", "overview": "Le général romain Maximus est le plus fidèle soutien de l'empereur Marc Aurèle, qu'il a conduit de victoire en victoire avec une bravoure et un dévouement exemplaires. Jaloux du prestige de Maximus, et plus encore de l'amour que lui voue l'empereur, le fils de Marc Aurèle, Commode, s'arroge brutalement le pouvoir, puis ordonne l'arrestation du général et son exécution. Maximus échappe à ses assassins mais ne peut empêcher le massacre de sa famille. Capturé par un marchand d'esclaves, il devient gladiateur et prépare sa vengeance.", "seen": false}, "286217": {"id": "286217", "title": "Seul sur Mars", "fr_title": "Seul sur Mars", "year": "2015", "overview": "Au cours d’une mission spatiale habitée sur Mars, et à la suite d’un violent orage, l’astronaute Mark Watney est laissé pour mort et abandonné sur place par son équipage. Mais Watney a survécu et se retrouve seul sur cette planète hostile. Avec de maigres provisions, il ne doit compter que sur son ingéniosité, son bon sens et son intelligence pour survivre et trouver un moyen d’alerter la Terre qu’il est encore vivant. À des millions de kilomètres de là, la NASA et une équipe de scientifiques internationaux travaillent sans relâche pour ramener « le Martien » sur terre, pendant que, en parallèle, ses coéquipiers tentent secrètement d’organiser une audacieuse voire impossible mission de sauvetage.", "seen": false}, "274": {"id": "274", "title": "Le Silence des agneaux", "fr_title": "Le Silence des agneaux", "year": "1991", "overview": "Un psychopathe connu sous le nom de Buffalo Bill sème la terreur dans le Middle West en kidnappant et en assassinant de jeunes femmes. Clarice Starling, une jeune stagiaire du FBI, est chargée d’interroger l’ex‐psychiatre Hannibal Lecter. Psychopathe redoutablement intelligent et porté sur le cannibalisme, Lecter est capable de lui fournir des informations concernant Buffalo Bill ainsi que son portrait psychologique. Mais il n’accepte de l’aider qu’en échange d’informations sur la vie privée de la jeune femme. Entre eux s’établit un lien de fascination et de répulsion.", "seen": false}, "4547": {"id": "4547", "title": "Panic Room", "fr_title": "Panic Room", "year": "2002", "overview": "Récemment séparée de son mari, Meg Altman est angoissée à l'idée de devoir élever seule sa fille Sarah. Elle achète une immense et splendide maison dans un quartier huppé à l'Ouest de New York. Son ancien propriétaire, un milliardaire, y a fait construire une pièce de sûreté dans laquelle on peut se réfugier en cas de menace extérieure et rester enfermé de nombreux jours grâce aux provisions qu'elle contient. Un soir, trois cambrioleurs pénètrent dans la maison avec la ferme intention de dérober une somme de 14 millions de dollars cachée par l'ancien maître des lieux. Ce butin serait-il dissimulé dans la pièce de sûreté, là où se sont réfugiées Meg et Sarah ?", "seen": false}, "629": {"id": "629", "title": "Usual Suspects", "fr_title": "Usual Suspects", "year": "1995", "overview": "Suspect numéro 1 dans une étrange affaire de hold-up, Verbal Kint est soumis à un interrogatoire par des agents fédéraux. Très vite, il dévoile aux policiers que le véritable cerveau de cette affaire n'est autre que le redoutable criminel Keyser Soze, un être machiavélique possédant une intelligence hors du commun. Peu à peu, le suspect va dresser un portrait effrayant de ce criminel que personne n'a jamais vu…", "seen": false}, "161": {"id": "161", "title": "Ocean's Eleven", "fr_title": "Ocean's Eleven", "year": "2001", "overview": "À peine sorti de prison, Danny Ocean n'a qu'une idée en tête : organiser le casse du siècle en cambriolant les trois plus grands casinos de Las Vegas. Pour cela il réunit une équipe de malfrats spécialistes dans des domaines aussi variés que les explosifs, l'informatique, le bluff...", "seen": false}, "163": {"id": "163", "title": "Ocean's Twelve", "fr_title": "Ocean's Twelve", "year": "2004", "overview": "Trois ans ont passé depuis le braquage historique du casino Bellagio de Las Vegas. Depuis, Danny Ocean et ses associés se sont dispersés dans la nature avec l'intention de mener une existence honnête. Remarié à Tess, ce dernier joue profil bas jusqu'au jour où Terry Benedict retrouve sa trace. Le propriétaire du Bellagio n'y va pas par quatre chemins: la bande doit, sous peine de mort, lui restituer le magot. Et ce n'est qu'un début, car quelqu'un d'autre s'intéresse de très près aux agissements de la bande des Onze...", "seen": false}, "298": {"id": "298", "title": "Ocean's 13", "fr_title": "Ocean's Thirteen", "year": "2007", "overview": "Willy Bank n'aurait pas dû s'attaquer à un ami de Danny Ocean... Pour avoir trahi Reuben Tishkoff, Willy Bank, propriétaire sans scrupule d'un casino flambant neuf, va être sévèrement attaqué par toute l'équipe de Danny Ocean. Celle-ci n'aura plus qu'un objectif: infliger à Bank un châtiment exemplaire le soir de l'inauguration de son nouveau casino. Mais cette fois la chance ne leur suffira pas pour faire sauter The Bank...", "seen": false}, "954": {"id": "954", "title": "Mission : Impossible", "fr_title": "Mission : Impossible", "year": "1996", "overview": "Ethan Hunt, un agent secret de haut niveau, est accusé de la mort de son équipe d'espionnage. Alors qu'il fuit les criminels du gouvernement, qu'il s'introduit dans la chambre forte la plus impénétrable de la CIA et qu'il se cramponne au toit d'un train à grande vitesse, Hunt se retrouve dans une course effrénée pour devancer ceux qui le poursuivent… et se rapprocher petit à petit d'une vérité bouleversante.", "seen": false}, "74": {"id": "74", "title": "La Guerre des mondes", "fr_title": "La Guerre des mondes", "year": "2005", "overview": "Ray Ferrier est un docker divorcé et un père rien moins que parfait, qui n’entretient plus que des relations épisodiques avec son fils Robbie, 17 ans, et sa fille Rachel, 11 ans. Quelques minutes après que son ex‐femme et l’époux de cette dernière lui ont confié la garde des enfants, un puissant orage éclate. Ray assiste alors à un spectacle qui bouleversera à jamais sa vie…", "seen": false}, "180": {"id": "180", "title": "Minority Report", "fr_title": "Minority Report", "year": "2002", "overview": "Washington, 2054. Plus aucun meurtre ne se produit grâce au « pré-crime », l’unité policière dirigée par John Anderton. Cette unité dispose d'un système lui permettant de visualiser les meurtres avant qu'ils ne se produisent. Mais quand John découvre qu'il est lui-même accusé d'un meurtre à venir, il n'a que 36 heures pour comprendre le véritable fonctionnement de ce système.", "seen": false}, "1903": {"id": "1903", "title": "Vanilla Sky", "fr_title": "Vanilla Sky", "year": "2001", "overview": "David Aames est un jeune et brillant éditeur new-yorkais qui a tout pour lui : l'argent, la réussite professionnelle et les femmes. Son ami Pelayo commet l'erreur de lui présenter Sofia, sa nouvelle compagne. Au premier regard, David succombe au charme de celle-ci. Tous les deux filent bientôt le parfait amour. Alors que David se dispute en voiture avec Julie, une ex folle de jalousie, la jeune femme accélère et c'est l'accident. Julie décède. Atrocement défiguré, David est transporté d'urgence à l'hôpital où les médecins ne peuvent réaliser de miracle. Sa vie bascule. Les gens ont dorénavant peur de lui et Sofia l'évite. Mais un matin, David se fait gentiment réveiller par celle-ci, qui lui déclare son amour. Les médecins lui annoncent même qu'il pourra retrouver son ancien visage. Réalité ou hallucination ?", "seen": false}, "334": {"id": "334", "title": "Magnolia", "fr_title": "Magnolia", "year": "1999", "overview": "Earl Partridge, âgé et malade, va bientôt mourir. Il demande à son fidèle infirmier de retrouver le fils qu'il a jadis abandonné. Sa jeune épouse, qui convoitait sa fortune, devrait se réjouir mais n'y parvient pas. Frank Mackey, jeune gourou cathodique de la séduction masculine, s'est construit un passé et une vie. Mais combien de temps le masque peut-il résister ? Toutes ces vies s'entrecroisent le temps d'une journée comme les autres sous le soleil de la Californie.", "seen": false}, "881": {"id": "881", "title": "Des hommes d'honneur", "fr_title": "Des hommes d'honneur", "year": "1992", "overview": "Deux jeunes marines, Louden et Dawson, abattent, au cours d'une action disciplinaire désignée \"Code Rouge\", un de leur leurs camarades, Santiago. C'est le lieutenant Daniel Kaffee qui est désigné pour assurer leur défense lors de leur procès. Mais si Kaffee entame une défense de pure routine, sa jeune et pugnace adjointe, le lieutenant JoAnne Galoway, se rebiffe et l'oblige a instruire le dossier. Kaffee va devoir, pour découvrir la vérité sur cette affaire qui s'avère inquiétante, remonter jusqu'au sommet de la hiérarchie.", "seen": false}, "37233": {"id": "37233", "title": "La Firme", "fr_title": "La Firme", "year": "1993", "overview": "À la fin de ses études de droit, Mitch McDeere, brillant élément, est sollicité par plusieurs grands cabinets d'avocats. Il fixe son choix sur Bendini, Lambert & Locke, qui lui offrent les conditions les plus avantageuses. En contrepartie, il devra, comme chaque membre du cabinet, fournir quelque quatre-vingts heures de travail hebdomadaire. Il ignore encore qu'il vient de vendre son âme au diable.", "seen": false}, "544": {"id": "544", "title": "Mary à tout prix", "fr_title": "Mary à tout prix", "year": "1998", "overview": "Ted, le loser, décide de retrouver son amour de jeunesse, la splendide Mary. Il engage un détective privé, Pat Healy, pour la retrouver. Persuadé qu'il a affaire à un dégénéré, Healy file à Miami et retrouve Mary. Elle est belle, gentille, s'occupe d'enfants handicapés et elle est célibataire. Decidé à garder Mary pour lui, il raconte à Ted qu'elle est devenue grosse, qu'elle est paralytique et qu'elle a quatre enfants. Mais Tucker, un architecte, est également amoureux de Mary. Il va faire cause commune avec Healy pour se débarrasser de Ted qui finalement a décidé de venir à Miami.", "seen": false}, "1593": {"id": "1593", "title": "La Nuit au musée", "fr_title": "La Nuit au musée", "year": "2006", "overview": "Le Muséum d'Histoire Naturelle renferme dans ses murs un secret mystérieux et stupéfiant que Larry, nouveau gardien de sécurité, ne va pas tarder à découvrir avec affolement : la nuit, toutes les expositions prennent vie ! Sous ses yeux, les soldats romains et les cow-boys miniatures se lancent dans une guerre acharnée, Attila et ses Huns commencent à piller les expositions avoisinantes, la momie tente de sortir de son sarcophage, le squelette du redoutable – mais néanmoins attachant – tyrannosaure rôde dans les couloirs... Le chaos est total ! Larry pourra-t-il remettre de l'ordre dans ses collections et sauver le musée ?", "seen": false}, "1597": {"id": "1597", "title": "Mon beau-père et moi", "fr_title": "Mon beau-père et moi", "year": "2000", "overview": "Greg Focker, un modeste infirmier de Chicago, vit depuis deux mois avec la charmante Pam Byrnes et rêve d'officialiser leur union. Ravie de sa proposition, la jeune femme insiste pour un strict respect des règles bourgeoises : Greg devra obtenir l'accord de son père, Jack.Deux semaines plus tard, le couple fait son apparition dans la luxueuse résidence des Byrnes. Accueilli à bras ouverts par la mère de Pam, Dina, Greg décèle d'emblée une certaine froideur chez Jack. Ce dernier ne compte pas \"céder\" sa fille chérie au premier venu.Bien décidé à emporter la mise, Greg, nerveux, se met en quatre pour s'attirer la sympathie et le respect de son beau-père, ancien agent de la CIA, mais toutes ses amabilités, toutes ses plaisanteries tombent à plat face à cet homme crispé, possessif et paranoïaque.", "seen": false}, "693": {"id": "693", "title": "Mon beau-père, mes parents et moi", "fr_title": "Mon beau-père, mes parents et moi", "year": "2004", "overview": "Greg Focker est un brave infirmier qui accumule les déboires, les maladresses et les faux-pas. Soucieux de plaire à tout le monde et de faire oublier son nom grotesque, sa première entrevue avec ses futurs beaux-parents Jack et Dina Byrnes fut un concentré exemplaire de tout ce qu'il ne faut pas faire dans de telles circonstances. Entre-temps, les choses se sont arrangées, et Greg a même réussi à amadouer le terrifiant Jack et à intégrer son cercle de confiance. Pam et lui peuvent donc envisager le mariage, mais il reste à organiser une réunion entre les Byrnes et les Focker. Un paisible week-end en Floride dans la propriété de Bernie et Roz Focker - lui fervent libéral, elle sexologue militante - permettra enfin aux deux familles de lier connaissance. Un ultime examen de passage, qui ne devrait pas poser de problème…", "seen": false}, "90": {"id": "90", "title": "Le Flic de Beverly Hills", "fr_title": "Le Flic de Beverly Hills", "year": "1984", "overview": "Axel Foley, ancien voyou, est maintenant un des flics les plus efficaces de Detroit. Et même si ses méthodes sont loin d'être traditionnelles, ses supérieurs sont bien obligés de reconnaître ses qualités. Axel retrouve un ami d’enfance, mais celui-ci est assassiné le jour de leurs retrouvailles. L'enquête lui étant refusée, Axel prend ses congés et se lance à la poursuite du meurtrier. Le petit flic de Detroit se retrouve à Beverly Hills, entraîné dans le milieu des dealers et des truands…", "seen": false}, "9602": {"id": "9602", "title": "Un prince à New York", "fr_title": "Un prince à New York", "year": "1988", "overview": "Au royaume africain du Zamunda, son altesse royale, le prince Akeem célèbre ses 21 ans, devant ainsi majeur et doit se marier. Depuis son plus jeune âge, des servantes toutes dévouées ont toujours satisfait le moindre de ses désirs, même les plus intimes et parfait à son éducations royale. Ses parents, le roi Jaffe Joffer et la reine Aoleon, lui ont choisi une future épouse, Imani Izzi, qui n'a été élevée que pour servir le futur roi. Toutefois, le futur roi ne veut pas d'une femme dévouée à sa vie, il souhaite rencontrer une femme en accord avec ses sentiments, avec une personnalité. Pour se faire, et en dissimulant une partie de la vérité à ses royaux parents, Akeem gagne New York, dans le quartier du Queens avec son serviteur Semmi où il entreprend de vivre dans une pauvreté factice pour trouver la femme idéale.", "seen": false}, "1621": {"id": "1621", "title": "Un fauteuil pour deux", "fr_title": "Un fauteuil pour deux", "year": "1983", "overview": "D'un côté, Louis Winthorpe III, un jeune directeur, est chargé des investissements chez Duke & Duke, une puissante banque de Philadelphie. De l'autre, Billy Ray Valentine est un noir combinard mais fauché. Tous deux vont faire l'objet d'un pari insensé, passé entre les patrons de Louis.", "seen": false}, "105": {"id": "105", "title": "Retour vers le futur", "fr_title": "Retour vers le futur", "year": "1985", "overview": "En 1985, Marty, un adolescent comme les autres, mène une existence morne et ennuyeuse. Heureusement, il est épris de la jolie Jennifer et entretient une profonde amitié avec Doc, un savant fou qui prétend avoir inventé une machine à explorer le temps. Un jour, Doc invite Marty à l'essayer…", "seen": false}, "771": {"id": "771", "title": "Maman, j'ai raté l'avion !", "fr_title": "Maman, j'ai raté l'avion", "year": "1990", "overview": "La famille McCallister a décidé de passer les fêtes de Noël à Paris. Seulement Kate et Peter McCallister s'aperçoivent dans l'avion qu'il leur manque le plus jeune de leurs enfants, Kevin, âgé de 9 ans. D'abord désespéré, Kevin reprend vite les choses en main et s'organise pour vivre le mieux possible. Quand deux cambrioleurs choisissent sa maison pour commettre leurs méfaits.", "seen": false}, "772": {"id": "772", "title": "Maman, j'ai encore raté l'avion !", "fr_title": "Maman, j'ai encore raté l'avion", "year": "1992", "overview": "Après Paris, c'est à Miami que la tribu McCallister décide de passer les fêtes de Noël. À l'aube du jour J, toute la famille est sur le pied de guerre et file a l'aéroport en prenant bien garde de ne pas oublier Kevin. Mais celui-ci s'éclipse pour acheter des piles pour son walkman, il ne retrouve plus les siens et s'embarque par mégarde pour New York...", "seen": false}, "639": {"id": "639", "title": "Quand Harry rencontre Sally…", "fr_title": "Quand Harry rencontre Sally", "year": "1989", "overview": "Lorsqu'ils se rencontrent pour la première fois dans les années 70, Harry et Sally ne s'apprécient pas, mais alors pas du tout. Ils se quittent, jurant de ne plus se revoir. Cinq ans plus tard, ils se retrouvent mais rien n'a changé : leurs avis sur les relations hommes-femmes divergent du tout au tout. Cinq autres années passent, et Harry rencontre Sally à nouveau. Ils se racontent leurs expériences, leurs déceptions et se rendent compte que leur vie amoureuse est un désastre. Mais l'amitié entre Harry et Sally est-elle possible ?", "seen": false}, "858": {"id": "858", "title": "Nuits Blanches à Seattle", "fr_title": "Nuits blanches à Seattle", "year": "1993", "overview": "Annie Reed, journaliste, s'émeut quand elle entend à la radio l'histoire de Sam Baldwin. Touchée par cette histoire, elle tente d'entrer en contact avec Sam, malgré l'approche de son mariage avec Walter et la distance qui sépare Seattle de Baltimore. C'est le début d'une course à l'amour.", "seen": false}, "9489": {"id": "9489", "title": "Vous avez un mess@ge", "fr_title": "Vous avez un message", "year": "1998", "overview": "Tous les deux sont libraires. Kathleen tient une échoppe au charme suranné, The Shop Around the Corner, et a initié aux joies de la lecture des ribambelles d'enfants tandis que Joe possède une chaîne de librairies de grande surface, Fox Books, qui a rapidement éliminé ses concurrentes. Kathleen hait plus que tout au monde Fox Books tandis que Joe attend nonchalamment de rayer des librairies celle de Kathlen. Ils ne se connaissent pas mais se croisent tous les jours et surtout comme dans le film de Lubitsch échangent une correspondance follement amoureuse par le biais d'Internet.", "seen": false}, "594": {"id": "594", "title": "Le Terminal", "fr_title": "Le Terminal", "year": "2004", "overview": "Viktor Navorski est l’un de ces milliers de touristes, venus des quatre coins du monde, qui débarquent chaque jour à l’Aéroport JFK de New York. Mais, à quelques heures de son arrivée, voilà qu’un coup d’État bouleverse sa petite république d’Europe Centrale, mettant celle‐ci au ban des nations et faisant de Viktor… un apatride. Les portes de l’Amérique se ferment devant lui, alors même que se bouclent les frontières de son pays: Viktor est bel et bien coincé…", "seen": false}, "8358": {"id": "8358", "title": "Seul au monde", "fr_title": "Seul au monde", "year": "2000", "overview": "Chuck Noland, gestionnaire au service d’un transporteur international, ne vit que par son travail. Il sillonne le monde pour améliorer les performances de son entreprise et la productivité de ses équipes. Il ne voit sa compagne Kelly que quelques jours par an. Lors de l’un de ses déplacements, Chuck est victime d’un accident d'avion qui coule en plein Pacifique. Agrippé à un radeau de sauvetage, Chuck s’échoue sur un îlot désert. Seul au monde, privé de tous ses repères habituels, le naufragé doit apprendre les gestes élémentaires pour sa survie.", "seen": false}, "497": {"id": "497", "title": "La Ligne verte", "fr_title": "La Ligne verte", "year": "1999", "overview": "Paul Edgecomb, pensionnaire centenaire d’une maison de retraite, est hanté par ses souvenirs. Gardien-chef du pénitencier de Cold Mountain en 1935, il était chargé de veiller au bon déroulement des exécutions des peines capitales, en s’efforçant d’adoucir les derniers moments des condamnés. Parmi eux, se trouvait un colosse du nom de John Coffey, accusé du viol et du meurtre de deux fillettes. Intrigué par cet homme candide et timide, aux dons magiques, Edgecomb va tisser avec lui des liens très forts.", "seen": false}, "13": {"id": "13", "title": "Forrest Gump", "fr_title": "Forrest Gump", "year": "1994", "overview": "À Savannah, État de Géorgie, Forrest Gump, assis sur un banc public, livre à qui veut l’entendre, l’étrange récit de sa vie mouvementée sur trois décennies. Il naît dans un bourg de l’Alabama, affecté d’un quotient intellectuel inférieur à la moyenne et d’une paralysie partielle des jambes. Souvent raillé à l’école, le jeune Forrest se lie d’amitié avec Jenny. Propulsé de l'état d'handicapé physique à celui de vedette du football, de héros du Vietnam au roi de la crevette, des honneurs de la Maison Blanche au bonheur d'une histoire d'amour, Forrest est le symbole d'une époque, un candide dans une Amérique qui a perdu son innocence.", "seen": false}, "9800": {"id": "9800", "title": "Philadelphia", "fr_title": "Philadelphia", "year": "1993", "overview": "Andrew Beckett, brillant avocat, est appelé à une carriere fulgurante. Adulé par son milieu, rien ne semble pouvoir ralentir son ascension. Mais, le jour où ses associés apprennent qu'Andrew est atteint du sida, ils n'hésitent pas à pretexter une faute professionnelle pour justifier son renvoi. Andrew décide de ne pas se laisser faire et attaque le cabinet pour licenciement abusif.", "seen": false}, "857": {"id": "857", "title": "Il faut sauver le soldat Ryan", "fr_title": "Il faut sauver le soldat Ryan", "year": "1998", "overview": "Vue à travers le regard d’une escouade de soldats américains, l’histoire débute le jour du Débarquement au cours de la 2ème Guerre Mondiale, le long des plages de Normandie. Le capitaine John Miller a pour mission de retrouver le soldat James Ryan, dont les trois frères sont morts au combat et il s’expose ainsi à de nombreux risques. Confrontés à une situation périlleuse, les hommes discutent les ordres. Pourquoi huit hommes risqueraient-ils leur vie pour un seul homme ? Rattrapés par la brutalité de la guerre, chacun cherche sa propre réponse ainsi que la force de vaincre un futur incertain avec honneur, décence et courage.", "seen": false}, "568": {"id": "568", "title": "Apollo 13", "fr_title": "Apollo 13", "year": "1995", "overview": "Après les premiers pas de l'homme sur la Lune, la NASA décide de poursuivre les vols habités. Jim Lovell qui, deux ans plus tôt, avait participé au vol Apollo 8, est choisi pour diriger la mission Apollo 13. Avec Fred Haise et Ken Mattingly, il suit un entraînement intensif. Une semaine avant le départ prévu, les médecins détectent chez Ken Mattingly des signes de rougeole. À contrecœur, Jim Lovell doit se résigner à le remplacer par Jack Swigert, insuffisamment préparé à son goût. Le jour du lancement, le 11 avril 1970, Apollo 13 décolle de Cap Kennedy, dans l'indifférence générale. Jusqu'au troisième jour, tout se passe bien…", "seen": false}, "1213": {"id": "1213", "title": "Le Talentueux M. Ripley", "fr_title": "Le Talentueux Mr Ripley", "year": "1999", "overview": "Tom Ripley, jeune homme désargenté mais ambitieux, attire l’attention d’un riche vieillard, Herbert Greenleaf, qui le charge de convaincre son fils Dickie, exilé en Italie, de rentrer aux États‐Unis. Sur place, Tom se laisse fasciner par l’existence insouciante et dorée que mène le jeune oisif. Il adopte ses goûts, imite son comportement, désire sa compagne, et va jusqu’à s’éprendre de Dickie lui‐même. Celui‐ci, dans un premier temps, traite Tom comme un ami mais, très vite, il commence à le trouver encombrant, pour ne pas dire énervant. Un jour, alors qu’ils sont seuls en mer, Tom avoue son amour à Dickie, qui le repousse violemment. Le conflit qui s’ensuit se termine par la mort de Dickie…", "seen": false}, "22954": {"id": "22954", "title": "Invictus", "fr_title": "Invictus", "year": "2009", "overview": "En 1994, l'élection de Nelson Mandela consacre la fin de l'Apartheid, mais l'Afrique du Sud reste une nation profondément divisée sur le plan racial et économique. Pour unifier le pays et donner à chaque citoyen un motif de fierté, Mandela mise sur le sport, et fait cause commune avec le capitaine de la modeste équipe de rugby sud-africaine. Leur pari: se présenter à la coupe du monde de rugby de 1995...", "seen": false}, "2501": {"id": "2501", "title": "La Mémoire dans la peau", "fr_title": "La Mémoire dans la peau", "year": "2002", "overview": "Un homme entre la vie et la mort est tiré de l’océan par un bateau de pêche italien. Ayant retrouvé ses esprits, il se rend compte qu’il souffre d’amnésie totale et qu’il n’a sur lui aucun papier d’identité. Les nombreux talents qu’il se découvre, techniques de combat et connaissances de plusieurs langues, lui suggèrent un passé dangereux. Aidé de la d’abord récalcitrante Marie, il s’engage dans une recherche désespérée pour retrouver son identité et la raison qui pousse d’impitoyables assassins à le traquer.", "seen": false}, "70": {"id": "70", "title": "Million Dollar Baby", "fr_title": "Million Dollar Baby", "year": "2004", "overview": "Rejeté depuis longtemps par sa fille, l’entraîneur Frankie Dunn s’est replié sur lui‐même et vit dans un désert affectif, en évitant toute relation qui pourrait accroître sa douleur et sa culpabilité. Le jour où Maggie Fitzgerald, 31 ans, pousse la porte de son gymnase à la recherche d’un coach, elle n’amène pas seulement avec elle sa jeunesse et sa force, mais aussi une histoire jalonnée d’épreuves et une exigence, vitale et urgente : monter sur le ring, entraînée par Frankie, et enfin concrétiser le rêve d’une vie. Après avoir repoussé plusieurs fois sa demande, Frankie se laisse convaincre par l’inflexible détermination de la jeune femme. Une relation mouvementée, tour à tour stimulante et exaspérante, se noue entre eux, au fil de laquelle Maggie et l’entraîneur se découvrent une communauté d’esprit et une complicité inattendues…", "seen": false}, "688": {"id": "688", "title": "Sur la route de Madison", "fr_title": "Sur la route de Madison", "year": "1995", "overview": "À la mort de leur mère, Michael Johnson et sa sœur Caroline se retrouvent dans la ferme où ils ont passé leur enfance, dans l'Iowa. Ils apprennent avec consternation que la défunte, Francesca, a demandé que ses cendres soient répandues du haut du pont de Roseman. Une bizarrerie que la lecture du journal intime de Francesca va expliquer. Jadis, au cours de l'été 1965, alors que son mari et ses deux enfants s'absentent pour quelques jours, Francesca voit arriver une camionnette bringuebalante. Robert Kincaid, un photographe sexagénaire, en descend et lui demande le chemin du pont de Roseman. Plutôt que de le lui expliquer, Francesca décide de lui montrer le chemin...", "seen": false}, "13223": {"id": "13223", "title": "Gran Torino", "fr_title": "Gran Torino", "year": "2008", "overview": "Walt Kowalski est un ancien de la guerre de Corée, un homme inflexible, amer et pétri de préjugés surannés. Après des années de travail à la chaîne, il vit replié sur lui-même, occupant ses journées à bricoler, traînasser et siroter des bières. Avant de mourir, sa femme exprima le vœu qu'il aille à confesse, mais Walt n'a rien à avouer, ni personne à qui parler. Hormis sa chienne Daisy, il ne fait confiance qu'à son M-1, toujours propre, toujours prêt à l'usage… Ses anciens voisins ont déménagé ou sont morts depuis longtemps. Son quartier est aujourd'hui peuplé d'immigrants asiatiques qu'il méprise, et Walt ressasse ses haines, innombrables - à l'encontre de ses voisins, des ados Hmong, latinos et afro-américains « qui croient faire la loi », de ses propres enfants, devenus pour lui des étrangers. Walt tue le temps comme il peut, en attendant le grand départ, jusqu'au jour où un ado Hmong du quartier tente de lui voler sa précieuse Ford Gran Torino…", "seen": false}, "190859": {"id": "190859", "title": "American Sniper", "fr_title": "American Sniper", "year": "2014", "overview": "Tireur d’élite des Navy SEAL, Chris Kyle est envoyé en Irak dans un seul but : protéger ses camarades. Sa précision chirurgicale sauve d’innombrables vies humaines sur le champ de bataille et, tandis que les récits de ses exploits se multiplient, il décroche le surnom de « La Légende ». Cependant, sa réputation se propage au-delà des lignes ennemies, si bien que sa tête est mise à prix et qu’il devient une cible privilégiée des insurgés. Malgré le danger, et l’angoisse dans laquelle vit sa famille, Chris participe à quatre batailles décisives parmi les plus terribles de la guerre en Irak, s’imposant ainsi comme l’incarnation vivante de la devise des SEAL : « Pas de quartier ! ». Mais en rentrant au pays, Chris prend conscience qu’il ne parvient pas à retrouver une vie normale.", "seen": false}, "278": {"id": "278", "title": "Les Évadés", "fr_title": "Les Évadés", "year": "1994", "overview": "En 1947, Andy Dufresne, un jeune banquier, est condamné à la prison à vie pour le meurtre de sa femme et de son amant. Ayant beau clamer son innocence, il est emprisonné à Shawshank, le pénitencier le plus sévère de l'État du Maine. Il y fait la rencontre de Red, un noir désabusé, détenu depuis vingt ans. Commence alors une grande histoire d'amitié entre les deux hommes…", "seen": false}, "85": {"id": "85", "title": "Les Aventuriers de l'arche perdue", "fr_title": "Les Aventuriers de l'arche perdue", "year": "1981", "overview": "L'Arche d'Alliance contenant les tables de la Loi brisées par Moïse, voici 3.000 ans, est l'objet de la convoitise des nazis. L'archéologue aventurier Indiana Jones se lance à sa recherche, poursuivi par son ennemi Belloq.", "seen": false}, "207": {"id": "207", "title": "Le Cercle des poètes disparus", "fr_title": "Le Cercle des poètes disparus", "year": "1989", "overview": "Todd Anderson est un garçon plutôt timide. Désormais élève de la prestigieuse académie Welton, réputée pour être l'une des plus fermées et austères des États-Unis, tout le monde attend de lui qu'il suive les traces de son frère, qui avait fait à Welton de brillantes études.  C'est là qu'il va faire la rencontre de M. Keating, un professeur de lettres anglaises qui, c'est le moins que l'on puisse dire, sort des sentiers battus. Jour après jour, M. Keating encourage ses élèves à penser par eux-mêmes et à refuser l'ordre établi. Cette rencontre va bouleverser la vie du jeune Todd, mais aussi celle de ses amis.", "seen": false}, "101": {"id": "101", "title": "Léon", "fr_title": "Léon", "year": "1994", "overview": "Léon est un tueur professionnel redoutable et insaisissable. Il vit seul à New York avec sa plante verte et ses habitudes jusqu'au jour où une petite Mathilda de douze ans sonne à sa porte et fait irruption dans sa vie.", "seen": false}, "9322": {"id": "9322", "title": "Nikita", "fr_title": "Nikita", "year": "1991", "overview": "Le braquage d'une pharmacie par une bande de junkies en manque de drogue tourne mal : une fusillade cause la mort de plusieurs personnes dont un policier, abattu par la jeune Nikita. Condamnée à la prison à perpétuité, celle-ci fait bientôt la rencontre de Bob, un homme mystérieux qui contraint la jeune femme à travailler secrètement pour le gouvernement. Après quelques rébellions lors d'un entraînement intensif de plusieurs années, Nikita devient un agent hautement qualifié des services secrets, capable désormais selon Bob d'évoluer seule à l'extérieur. Celui-ci espère d'ailleurs s'en assurer lors d'une terrible mise à l'épreuve au cours de laquelle Nikita doit éliminer un pilier de la mafia asiatique au beau milieu d'un restaurant bondé...", "seen": false}, "175": {"id": "175", "title": "Le Grand Bleu", "fr_title": "Le Grand Bleu", "year": "1988", "overview": "C'est l'histoire de deux apnéistes, Jacques Mayol et Enzo Molinari. Leur aventure commence dans les îles grecques dès les années 50. Gamins, les deux plongeurs se disputent déjà tous les records des profondeurs. Vingt ans plus tard, ils se retrouvent concurrents au même championnat. «Le grand bleu», c'est l'amitié de ces deux hommes, liés définitivement à la mer.", "seen": false}, "23830": {"id": "23830", "title": "Last Night", "fr_title": "Last Night", "year": "2011", "overview": "Joanna et Michael vivent à New York. Aucun nuage, aucun doute n’est jamais venu assombrir leur union, jusqu’à ce que chacun d’eux soit tenté, la même nuit… Pendant que Michael est en déplacement professionnel avec Laura, jeune femme aussi attirante qu’énigmatique, Joanna recroise Alex, l’autre grand amour de sa vie. Les 36 heures qui suivent vont obliger chacun à faire des choix…", "seen": false}, "9377": {"id": "9377", "title": "La Folle Journée de Ferris Bueller", "fr_title": "La Folle Journée de Ferris Bueller", "year": "1986", "overview": "Ferris Bueller, un adolescent populaire et charmeur mais aussi cancre invétéré, convainc sa petite amie et son meilleur ami hypocondriaque (dont le père a une Ferrari) de sécher les cours pour aller passer la journée à Chicago. Pendant qu’ils font les 400 coups dans la grande ville, le proviseur et la sœur de Ferris tentent, chacun de leurs côtés, de prouver aux parents que leur fils est un cancre et qu’il a séché.", "seen": false}, "192": {"id": "192", "title": "Le Nom de la rose", "fr_title": "Le Nom de la rose", "year": "1986", "overview": "En l’an 1327, dans une abbaye bénédictine, des moines disparaissent. Un franciscain, Guillaume de Baskerville, mène l’enquête, aidé du jeune novice Adso von Melk. C’est l’époque où l’Église, en pleine crise, se voit disputer son pouvoir spirituel et temporel. C’est aussi l’apogée de l’Inquisition.", "seen": false}}, "genres": {"g1": "Drame", "g2": "Crime", "g3": "Romance", "g4": "Comédie", "g5": "Action", "g6": "Science-Fiction", "g7": "Aventure", "g8": "Thriller", "g9": "Mystère", "g10": "Western", "g11": "Guerre", "g12": "Fantastique", "g13": "Horreur", "g14": "Familial", "g15": "Histoire"}, "directors": {"d1": "Steven Spielberg", "d2": "James Cameron", "d3": "Martin Scorsese", "d4": "Christopher Nolan", "d5": "Baz Luhrmann", "d6": "Quentin Tarantino", "d7": "Danny Boyle", "d8": "David Fincher", "d9": "Martin Brest", "d10": "Ridley Scott", "d11": "Jonathan Demme", "d12": "Bryan Singer", "d13": "Steven Soderbergh", "d14": "Brian De Palma", "d15": "Cameron Crowe", "d16": "Paul Thomas Anderson", "d17": "Rob Reiner", "d18": "Sydney Pollack", "d19": "Bobby Farrelly", "d20": "Shawn Levy", "d21": "Jay Roach", "d22": "John Landis", "d23": "Robert Zemeckis", "d24": "Chris Columbus", "d25": "Nora Ephron", "d26": "Frank Darabont", "d27": "Ron Howard", "d28": "Anthony Minghella", "d29": "Clint Eastwood", "d30": "Doug Liman", "d31": "Peter Weir", "d32": "Luc Besson", "d33": "Massy Tadjedin", "d34": "John Hughes", "d35": "Jean-Jacques Annaud"}, "actors": {"a1": "Leonardo DiCaprio", "a2": "Tom Hanks", "a3": "Christopher Walken", "a4": "Kate Winslet", "a5": "Billy Zane", "a6": "Jonah Hill", "a7": "Margot Robbie", "a8": "Joseph Gordon-Levitt", "a9": "Ken Watanabe", "a10": "Tobey Maguire", "a11": "Carey Mulligan", "a12": "Mark Ruffalo", "a13": "Ben Kingsley", "a14": "Jamie Foxx", "a15": "Christoph Waltz", "a16": "Virginie Ledoyen", "a17": "Guillaume Canet", "a18": "John Travolta", "a19": "Samuel L. Jackson", "a20": "Uma Thurman", "a21": "Harvey Keitel", "a22": "Tim Roth", "a23": "Michael Madsen", "a24": "Lucy Liu", "a25": "Vivica A. Fox", "a26": "David Carradine", "a27": "Daryl Hannah", "a28": "Brad Pitt", "a29": "Mélanie Laurent", "a30": "Edward Norton", "a31": "Helena Bonham Carter", "a32": "Anthony Hopkins", "a33": "Claire Forlani", "a34": "Morgan Freeman", "a35": "Gwyneth Paltrow", "a36": "Michael Douglas", "a37": "Sean Penn", "a38": "Deborah Kara Unger", "a39": "Tom Skerritt", "a40": "Sigourney Weaver", "a41": "Veronica Cartwright", "a42": "Russell Crowe", "a43": "Joaquin Phoenix", "a44": "Connie Nielsen", "a45": "Matt Damon", "a46": "Jessica Chastain", "a47": "Kristen Wiig", "a48": "Jodie Foster", "a49": "Scott Glenn", "a50": "Kristen Stewart", "a51": "Forest Whitaker", "a52": "Stephen Baldwin", "a53": "Gabriel Byrne", "a54": "Benicio del Toro", "a55": "George Clooney", "a56": "Andy Garcia", "a57": "Julia Roberts", "a58": "Al Pacino", "a59": "Tom Cruise", "a60": "Jon Voight", "a61": "Emmanuelle Béart", "a62": "Dakota Fanning", "a63": "Justin Chatwin", "a64": "Samantha Morton", "a65": "Colin Farrell", "a66": "Penélope Cruz", "a67": "Cameron Diaz", "a68": "Philip Baker Hall", "a69": "Philip Seymour Hoffman", "a70": "Jack Nicholson", "a71": "Demi Moore", "a72": "Jeanne Tripplehorn", "a73": "Gene Hackman", "a74": "Matt Dillon", "a75": "Ben Stiller", "a76": "Carla Gugino", "a77": "Dick Van Dyke", "a78": "Robert De Niro", "a79": "Teri Polo", "a80": "Dustin Hoffman", "a81": "Eddie Murphy", "a82": "Judge Reinhold", "a83": "John Ashton", "a84": "Arsenio Hall", "a85": "Shari Headley", "a86": "Dan Aykroyd", "a87": "Ralph Bellamy", "a88": "Michael J. Fox", "a89": "Christopher Lloyd", "a90": "Crispin Glover", "a91": "Macaulay Culkin", "a92": "Joe Pesci", "a93": "Daniel Stern", "a94": "Billy Crystal", "a95": "Meg Ryan", "a96": "Carrie Fisher", "a97": "Ross Malinger", "a98": "Greg Kinnear", "a99": "Catherine Zeta-Jones", "a100": "Stanley Tucci", "a101": "Helen Hunt", "a102": "Chris Noth", "a103": "David Morse", "a104": "Bonnie Hunt", "a105": "Robin Wright", "a106": "Gary Sinise", "a107": "Denzel Washington", "a108": "Jason Robards", "a109": "Tom Sizemore", "a110": "Edward Burns", "a111": "Bill Paxton", "a112": "Kevin Bacon", "a113": "Jude Law", "a114": "Tony Kgoroge", "a115": "Franka Potente", "a116": "Chris Cooper", "a117": "Clint Eastwood", "a118": "Hilary Swank", "a119": "Meryl Streep", "a120": "Annie Corley", "a121": "Christopher Carley", "a122": "Bee Vang", "a123": "Bradley Cooper", "a124": "Sienna Miller", "a125": "Kyle Gallner", "a126": "Tim Robbins", "a127": "Bob Gunton", "a128": "Harrison Ford", "a129": "Karen Allen", "a130": "Paul Freeman", "a131": "Robin Williams", "a132": "Robert Sean Leonard", "a133": "Ethan Hawke", "a134": "Jean Reno", "a135": "Natalie Portman", "a136": "Gary Oldman", "a137": "Anne Parillaud", "a138": "Jean-Hugues Anglade", "a139": "Tchéky Karyo", "a140": "Jean-Marc Barr", "a141": "Rosanna Arquette", "a142": "Keira Knightley", "a143": "Sam Worthington", "a144": "Eva Mendes", "a145": "Matthew Broderick", "a146": "Alan Ruck", "a147": "Mia Sara", "a148": "Sean Connery", "a149": "Christian Slater", "a150": "Helmut Qualtinger"}, "posters": {"640": "https://image.tmdb.org/t/p/w500/nafyoqVGi87AwaV51GSJ0pk97gs.jpg", "597": "https://image.tmdb.org/t/p/w500/vpsvHLkoeKUjceIMeNSqCp3xEyY.jpg", "106646": "https://image.tmdb.org/t/p/w500/dQIQZbJXn1pflQw3nwvXLJX0dHa.jpg", "27205": "https://image.tmdb.org/t/p/w500/aej3LRUga5rhgkmRP6XMFw3ejbl.jpg", "64682": "https://image.tmdb.org/t/p/w500/apvQQZTVLTEHrkQiDdUe3jUDY9Y.jpg", "11324": "https://image.tmdb.org/t/p/w500/fQ0vGVTtxjCdAJnxwPZ88O3Wzrh.jpg", "68718": "https://image.tmdb.org/t/p/w500/vRXUnWrXUgXRoX0BaEcuNMfyeQt.jpg", "1907": "https://image.tmdb.org/t/p/w500/iH0mQA6Zn0RRZy3UvHhgwUAOq7V.jpg", "680": "https://image.tmdb.org/t/p/w500/4TBdF7nFw2aKNM0gPOlDNq3v3se.jpg", "500": "https://image.tmdb.org/t/p/w500/p61wwD0jWfgbhg9Ja9uoDZdS8YE.jpg", "24": "https://image.tmdb.org/t/p/w500/udRaQKzT0LG4iQFxHLaYjno9uAT.jpg", "393": "https://image.tmdb.org/t/p/w500/852ZvIARe3CISnX9t96unwSHyoL.jpg", "16869": "https://image.tmdb.org/t/p/w500/lPKwFzX4TiWLA4Mo5Bnf8aIIrJm.jpg", "550": "https://image.tmdb.org/t/p/w500/t1i10ptOivG4hV7erkX3tmKpiqm.jpg", "297": "https://image.tmdb.org/t/p/w500/5I66ZaHmUbZ9HgK34fFVeQPeAWP.jpg", "807": "https://image.tmdb.org/t/p/w500/upIOOLVeOoUkTM5fVWwXW2JmBrW.jpg", "2649": "https://image.tmdb.org/t/p/w500/2sUcLRG3ZwE8JOrCzk3M6GyCsTx.jpg", "348": "https://image.tmdb.org/t/p/w500/l8CES84JndFlNfBNMxdLRYaLvI6.jpg", "98": "https://image.tmdb.org/t/p/w500/5gJOu3t2QrznuJqjCG7FQDMI76t.jpg", "286217": "https://image.tmdb.org/t/p/w500/51CqiKVStZ2YPx64iPs3LDDiQnt.jpg", "274": "https://image.tmdb.org/t/p/w500/sSQDxwm4r28YpJSQVyVOtpYVs0E.jpg", "4547": "https://image.tmdb.org/t/p/w500/hZRbJ9a7YhdDOx8BECb8svI6qOQ.jpg", "629": "https://image.tmdb.org/t/p/w500/h06jDZB4Y9YQJiSGTcUwbhuiUrB.jpg", "161": "https://image.tmdb.org/t/p/w500/sLiFrrQn2iqfn3gYciJF1yqJCOU.jpg", "163": "https://image.tmdb.org/t/p/w500/x2lepGLOFv6XijMVl0mFpIs16AG.jpg", "298": "https://image.tmdb.org/t/p/w500/73OQ7Qlkq6bpNJytnvQLpQs4boa.jpg", "954": "https://image.tmdb.org/t/p/w500/RzurOKfiw5DrKkcyjXMBjQ7xHq.jpg", "74": "https://image.tmdb.org/t/p/w500/b2GIYpfFuO43ailnUFGER9LDa2Q.jpg", "180": "https://image.tmdb.org/t/p/w500/91dfWOkpjlqPkbZDjAjrReFqXQP.jpg", "1903": "https://image.tmdb.org/t/p/w500/rP5pOnQ7kZrPOOCGay2Vc1O84Z0.jpg", "334": "https://image.tmdb.org/t/p/w500/klhJK5KvHbWkGkO1x5bXzOfQAWp.jpg", "881": "https://image.tmdb.org/t/p/w500/vsjxwIGaA8GP79pgtv6dqRhRsPu.jpg", "37233": "https://image.tmdb.org/t/p/w500/qVlqbEiuZ05ZwoGxjNckomuwbe8.jpg", "544": "https://image.tmdb.org/t/p/w500/ad8kLFbtBqey2z1dYvcxyNVisMB.jpg", "1593": "https://image.tmdb.org/t/p/w500/iF88HSUPHFDPqW6jp4o8h40lbHC.jpg", "1597": "https://image.tmdb.org/t/p/w500/cEd840xfKawjUGjcnJj41KS3yBM.jpg", "693": "https://image.tmdb.org/t/p/w500/cCdZBRQbdlHu6Yyfp8GEEDZhgWV.jpg", "90": "https://image.tmdb.org/t/p/w500/wL8sSSJy4fYlIODtEmVgsx8qYOA.jpg", "9602": "https://image.tmdb.org/t/p/w500/fesM5L7mwuuBIRSOA9l7xXSNHH.jpg", "1621": "https://image.tmdb.org/t/p/w500/kU21ARWABQqoY2a5VRwDxVusT9G.jpg", "105": "https://image.tmdb.org/t/p/w500/iCgFtDUZxN8iUzNBCisjUrBmg2q.jpg", "771": "https://image.tmdb.org/t/p/w500/g0QlNeZzMkqyHfbSeoBCTcFNLWL.jpg", "772": "https://image.tmdb.org/t/p/w500/gFhf8NwvEKCbNIOQZxLqj1i5DMy.jpg", "639": "https://image.tmdb.org/t/p/w500/3LKgUlcBVobOmQ85cLwGycLP3LJ.jpg", "858": "https://image.tmdb.org/t/p/w500/6N6F80zYR3tFhDt2zIAFtK4TH6.jpg", "9489": "https://image.tmdb.org/t/p/w500/37KXAYL2A7wlQSiCHCRSZUoJL0K.jpg", "594": "https://image.tmdb.org/t/p/w500/2ornUh2bi1PRsuTARDuOSJK8tO7.jpg", "8358": "https://image.tmdb.org/t/p/w500/w1bnhSkcT4pa2KQZzRoq0BHBn8T.jpg", "497": "https://image.tmdb.org/t/p/w500/cRBUYC02CPsVa1GqBq6rfHn5a8g.jpg", "13": "https://image.tmdb.org/t/p/w500/zi6RNYK1vXjIvpSBgjatXRcFYh2.jpg", "9800": "https://image.tmdb.org/t/p/w500/nOw0nfcTQ7L1YkvUUrjgNyu7KPK.jpg", "857": "https://image.tmdb.org/t/p/w500/mlSsQWIQV0NKIqqRQRI0yi9gqk8.jpg", "568": "https://image.tmdb.org/t/p/w500/sOi7PkJXcdEAck9p12s0A7SXqaX.jpg", "1213": "https://image.tmdb.org/t/p/w500/vU4qTwtFpYF5EDsQwxqn4B83hzk.jpg", "22954": "https://image.tmdb.org/t/p/w500/4zpsqUf8XFzk4sYbGSXBap1bQKh.jpg", "2501": "https://image.tmdb.org/t/p/w500/osEb1avYb9MvGUCOIIX0fiXUXDN.jpg", "70": "https://image.tmdb.org/t/p/w500/7yWwlgq12qZ4nMLQHhEf8ITaggn.jpg", "688": "https://image.tmdb.org/t/p/w500/tSqlgE0vUG896MiK9YHBPe0buNO.jpg", "13223": "https://image.tmdb.org/t/p/w500/sVmDIIFPzbyEz87dZYpLfetn4Lm.jpg", "190859": "https://image.tmdb.org/t/p/w500/9BEN7zRpoLBaBU3t97kPJkHUgnv.jpg", "278": "https://image.tmdb.org/t/p/w500/t30GjttOdb5At1sYy8b3TOwFgWV.jpg", "85": "https://image.tmdb.org/t/p/w500/nTsllJhHBDZndFudSB2RgeHuQAt.jpg", "207": "https://image.tmdb.org/t/p/w500/oHBdsvdlPhzkJZOfax7Oy3X5mm7.jpg", "101": "https://image.tmdb.org/t/p/w500/efqJtlo5J1hBNFmbwyjyAR9Mpr2.jpg", "9322": "https://image.tmdb.org/t/p/w500/jLqvVdR1gucaMF5wtCAOS9nsolY.jpg", "175": "https://image.tmdb.org/t/p/w500/eoO9OkhstHjgODeUAlW2xr6BxRD.jpg", "23830": "https://image.tmdb.org/t/p/w500/6orMRIVqbQPtuMT14j35rVaLski.jpg", "9377": "https://image.tmdb.org/t/p/w500/uK8fRkPfQH3nLLOX5WVEA5E2HK.jpg", "192": "https://image.tmdb.org/t/p/w500/bpi3PEGT4674CrUjj2rqOkUuoAp.jpg"}, "film_genres": [{"filmId": "640", "genreId": "g1"}, {"filmId": "640", "genreId": "g2"}, {"filmId": "597", "genreId": "g1"}, {"filmId": "597", "genreId": "g3"}, {"filmId": "106646", "genreId": "g2"}, {"filmId": "106646", "genreId": "g1"}, {"filmId": "106646", "genreId": "g4"}, {"filmId": "27205", "genreId": "g5"}, {"filmId": "27205", "genreId": "g6"}, {"filmId": "27205", "genreId": "g7"}, {"filmId": "64682", "genreId": "g1"}, {"filmId": "64682", "genreId": "g3"}, {"filmId": "11324", "genreId": "g1"}, {"filmId": "11324", "genreId": "g8"}, {"filmId": "11324", "genreId": "g9"}, {"filmId": "68718", "genreId": "g1"}, {"filmId": "68718", "genreId": "g10"}, {"filmId": "1907", "genreId": "g1"}, {"filmId": "1907", "genreId": "g7"}, {"filmId": "1907", "genreId": "g3"}, {"filmId": "1907", "genreId": "g8"}, {"filmId": "680", "genreId": "g8"}, {"filmId": "680", "genreId": "g2"}, {"filmId": "680", "genreId": "g4"}, {"filmId": "500", "genreId": "g2"}, {"filmId": "500", "genreId": "g8"}, {"filmId": "24", "genreId": "g5"}, {"filmId": "24", "genreId": "g2"}, {"filmId": "393", "genreId": "g5"}, {"filmId": "393", "genreId": "g2"}, {"filmId": "393", "genreId": "g8"}, {"filmId": "16869", "genreId": "g1"}, {"filmId": "16869", "genreId": "g8"}, {"filmId": "16869", "genreId": "g11"}, {"filmId": "550", "genreId": "g1"}, {"filmId": "550", "genreId": "g8"}, {"filmId": "297", "genreId": "g12"}, {"filmId": "297", "genreId": "g1"}, {"filmId": "297", "genreId": "g3"}, {"filmId": "807", "genreId": "g2"}, {"filmId": "807", "genreId": "g9"}, {"filmId": "807", "genreId": "g8"}, {"filmId": "2649", "genreId": "g1"}, {"filmId": "2649", "genreId": "g8"}, {"filmId": "2649", "genreId": "g9"}, {"filmId": "348", "genreId": "g13"}, {"filmId": "348", "genreId": "g6"}, {"filmId": "98", "genreId": "g5"}, {"filmId": "98", "genreId": "g1"}, {"filmId": "98", "genreId": "g7"}, {"filmId": "286217", "genreId": "g6"}, {"filmId": "286217", "genreId": "g1"}, {"filmId": "286217", "genreId": "g7"}, {"filmId": "274", "genreId": "g2"}, {"filmId": "274", "genreId": "g8"}, {"filmId": "274", "genreId": "g1"}, {"filmId": "4547", "genreId": "g2"}, {"filmId": "4547", "genreId": "g1"}, {"filmId": "4547", "genreId": "g8"}, {"filmId": "629", "genreId": "g1"}, {"filmId": "629", "genreId": "g2"}, {"filmId": "629", "genreId": "g8"}, {"filmId": "161", "genreId": "g8"}, {"filmId": "161", "genreId": "g2"}, {"filmId": "163", "genreId": "g8"}, {"filmId": "163", "genreId": "g2"}, {"filmId": "298", "genreId": "g2"}, {"filmId": "298", "genreId": "g8"}, {"filmId": "954", "genreId": "g7"}, {"filmId": "954", "genreId": "g5"}, {"filmId": "954", "genreId": "g8"}, {"filmId": "74", "genreId": "g7"}, {"filmId": "74", "genreId": "g8"}, {"filmId": "74", "genreId": "g6"}, {"filmId": "180", "genreId": "g6"}, {"filmId": "180", "genreId": "g5"}, {"filmId": "180", "genreId": "g8"}, {"filmId": "1903", "genreId": "g9"}, {"filmId": "1903", "genreId": "g3"}, {"filmId": "1903", "genreId": "g6"}, {"filmId": "334", "genreId": "g1"}, {"filmId": "881", "genreId": "g1"}, {"filmId": "37233", "genreId": "g1"}, {"filmId": "37233", "genreId": "g9"}, {"filmId": "37233", "genreId": "g8"}, {"filmId": "544", "genreId": "g3"}, {"filmId": "544", "genreId": "g4"}, {"filmId": "1593", "genreId": "g12"}, {"filmId": "1593", "genreId": "g14"}, {"filmId": "1593", "genreId": "g4"}, {"filmId": "1597", "genreId": "g4"}, {"filmId": "1597", "genreId": "g3"}, {"filmId": "693", "genreId": "g4"}, {"filmId": "693", "genreId": "g3"}, {"filmId": "90", "genreId": "g4"}, {"filmId": "90", "genreId": "g2"}, {"filmId": "90", "genreId": "g5"}, {"filmId": "9602", "genreId": "g4"}, {"filmId": "9602", "genreId": "g3"}, {"filmId": "1621", "genreId": "g4"}, {"filmId": "105", "genreId": "g7"}, {"filmId": "105", "genreId": "g4"}, {"filmId": "105", "genreId": "g6"}, {"filmId": "771", "genreId": "g4"}, {"filmId": "771", "genreId": "g14"}, {"filmId": "772", "genreId": "g4"}, {"filmId": "772", "genreId": "g14"}, {"filmId": "772", "genreId": "g7"}, {"filmId": "639", "genreId": "g4"}, {"filmId": "639", "genreId": "g3"}, {"filmId": "639", "genreId": "g1"}, {"filmId": "858", "genreId": "g4"}, {"filmId": "858", "genreId": "g1"}, {"filmId": "858", "genreId": "g3"}, {"filmId": "9489", "genreId": "g4"}, {"filmId": "9489", "genreId": "g3"}, {"filmId": "594", "genreId": "g4"}, {"filmId": "594", "genreId": "g1"}, {"filmId": "8358", "genreId": "g7"}, {"filmId": "8358", "genreId": "g1"}, {"filmId": "497", "genreId": "g12"}, {"filmId": "497", "genreId": "g1"}, {"filmId": "497", "genreId": "g2"}, {"filmId": "13", "genreId": "g4"}, {"filmId": "13", "genreId": "g1"}, {"filmId": "13", "genreId": "g3"}, {"filmId": "9800", "genreId": "g1"}, {"filmId": "857", "genreId": "g11"}, {"filmId": "857", "genreId": "g1"}, {"filmId": "857", "genreId": "g15"}, {"filmId": "568", "genreId": "g1"}, {"filmId": "568", "genreId": "g15"}, {"filmId": "1213", "genreId": "g8"}, {"filmId": "1213", "genreId": "g2"}, {"filmId": "1213", "genreId": "g1"}, {"filmId": "22954", "genreId": "g1"}, {"filmId": "22954", "genreId": "g15"}, {"filmId": "2501", "genreId": "g5"}, {"filmId": "2501", "genreId": "g1"}, {"filmId": "2501", "genreId": "g9"}, {"filmId": "2501", "genreId": "g8"}, {"filmId": "70", "genreId": "g1"}, {"filmId": "688", "genreId": "g1"}, {"filmId": "688", "genreId": "g3"}, {"filmId": "13223", "genreId": "g1"}, {"filmId": "190859", "genreId": "g11"}, {"filmId": "190859", "genreId": "g5"}, {"filmId": "278", "genreId": "g1"}, {"filmId": "278", "genreId": "g2"}, {"filmId": "85", "genreId": "g7"}, {"filmId": "85", "genreId": "g5"}, {"filmId": "207", "genreId": "g1"}, {"filmId": "101", "genreId": "g2"}, {"filmId": "101", "genreId": "g1"}, {"filmId": "101", "genreId": "g5"}, {"filmId": "9322", "genreId": "g5"}, {"filmId": "9322", "genreId": "g8"}, {"filmId": "175", "genreId": "g3"}, {"filmId": "175", "genreId": "g7"}, {"filmId": "175", "genreId": "g1"}, {"filmId": "23830", "genreId": "g1"}, {"filmId": "23830", "genreId": "g3"}, {"filmId": "9377", "genreId": "g4"}, {"filmId": "192", "genreId": "g1"}, {"filmId": "192", "genreId": "g8"}, {"filmId": "192", "genreId": "g9"}], "film_actors": [{"filmId": "640", "actorId": "a1", "order": 0}, {"filmId": "640", "actorId": "a2", "order": 1}, {"filmId": "640", "actorId": "a3", "order": 2}, {"filmId": "597", "actorId": "a1", "order": 0}, {"filmId": "597", "actorId": "a4", "order": 1}, {"filmId": "597", "actorId": "a5", "order": 2}, {"filmId": "106646", "actorId": "a1", "order": 0}, {"filmId": "106646", "actorId": "a6", "order": 1}, {"filmId": "106646", "actorId": "a7", "order": 2}, {"filmId": "27205", "actorId": "a1", "order": 0}, {"filmId": "27205", "actorId": "a8", "order": 1}, {"filmId": "27205", "actorId": "a9", "order": 2}, {"filmId": "64682", "actorId": "a1", "order": 0}, {"filmId": "64682", "actorId": "a10", "order": 1}, {"filmId": "64682", "actorId": "a11", "order": 2}, {"filmId": "11324", "actorId": "a1", "order": 0}, {"filmId": "11324", "actorId": "a12", "order": 1}, {"filmId": "11324", "actorId": "a13", "order": 2}, {"filmId": "68718", "actorId": "a14", "order": 0}, {"filmId": "68718", "actorId": "a15", "order": 1}, {"filmId": "68718", "actorId": "a1", "order": 2}, {"filmId": "1907", "actorId": "a1", "order": 0}, {"filmId": "1907", "actorId": "a16", "order": 1}, {"filmId": "1907", "actorId": "a17", "order": 2}, {"filmId": "680", "actorId": "a18", "order": 0}, {"filmId": "680", "actorId": "a19", "order": 1}, {"filmId": "680", "actorId": "a20", "order": 2}, {"filmId": "500", "actorId": "a21", "order": 0}, {"filmId": "500", "actorId": "a22", "order": 1}, {"filmId": "500", "actorId": "a23", "order": 2}, {"filmId": "24", "actorId": "a20", "order": 0}, {"filmId": "24", "actorId": "a24", "order": 1}, {"filmId": "24", "actorId": "a25", "order": 2}, {"filmId": "393", "actorId": "a20", "order": 0}, {"filmId": "393", "actorId": "a26", "order": 1}, {"filmId": "393", "actorId": "a27", "order": 2}, {"filmId": "16869", "actorId": "a28", "order": 0}, {"filmId": "16869", "actorId": "a29", "order": 1}, {"filmId": "16869", "actorId": "a15", "order": 2}, {"filmId": "550", "actorId": "a30", "order": 0}, {"filmId": "550", "actorId": "a28", "order": 1}, {"filmId": "550", "actorId": "a31", "order": 2}, {"filmId": "297", "actorId": "a28", "order": 0}, {"filmId": "297", "actorId": "a32", "order": 1}, {"filmId": "297", "actorId": "a33", "order": 2}, {"filmId": "807", "actorId": "a34", "order": 0}, {"filmId": "807", "actorId": "a28", "order": 1}, {"filmId": "807", "actorId": "a35", "order": 2}, {"filmId": "2649", "actorId": "a36", "order": 0}, {"filmId": "2649", "actorId": "a37", "order": 1}, {"filmId": "2649", "actorId": "a38", "order": 2}, {"filmId": "348", "actorId": "a39", "order": 0}, {"filmId": "348", "actorId": "a40", "order": 1}, {"filmId": "348", "actorId": "a41", "order": 2}, {"filmId": "98", "actorId": "a42", "order": 0}, {"filmId": "98", "actorId": "a43", "order": 1}, {"filmId": "98", "actorId": "a44", "order": 2}, {"filmId": "286217", "actorId": "a45", "order": 0}, {"filmId": "286217", "actorId": "a46", "order": 1}, {"filmId": "286217", "actorId": "a47", "order": 2}, {"filmId": "274", "actorId": "a48", "order": 0}, {"filmId": "274", "actorId": "a32", "order": 1}, {"filmId": "274", "actorId": "a49", "order": 2}, {"filmId": "4547", "actorId": "a48", "order": 0}, {"filmId": "4547", "actorId": "a50", "order": 1}, {"filmId": "4547", "actorId": "a51", "order": 2}, {"filmId": "629", "actorId": "a52", "order": 0}, {"filmId": "629", "actorId": "a53", "order": 1}, {"filmId": "629", "actorId": "a54", "order": 2}, {"filmId": "161", "actorId": "a55", "order": 0}, {"filmId": "161", "actorId": "a28", "order": 1}, {"filmId": "161", "actorId": "a56", "order": 2}, {"filmId": "163", "actorId": "a55", "order": 0}, {"filmId": "163", "actorId": "a57", "order": 1}, {"filmId": "163", "actorId": "a28", "order": 2}, {"filmId": "298", "actorId": "a55", "order": 0}, {"filmId": "298", "actorId": "a28", "order": 1}, {"filmId": "298", "actorId": "a58", "order": 2}, {"filmId": "954", "actorId": "a59", "order": 0}, {"filmId": "954", "actorId": "a60", "order": 1}, {"filmId": "954", "actorId": "a61", "order": 2}, {"filmId": "74", "actorId": "a59", "order": 0}, {"filmId": "74", "actorId": "a62", "order": 1}, {"filmId": "74", "actorId": "a63", "order": 2}, {"filmId": "180", "actorId": "a59", "order": 0}, {"filmId": "180", "actorId": "a64", "order": 1}, {"filmId": "180", "actorId": "a65", "order": 2}, {"filmId": "1903", "actorId": "a59", "order": 0}, {"filmId": "1903", "actorId": "a66", "order": 1}, {"filmId": "1903", "actorId": "a67", "order": 2}, {"filmId": "334", "actorId": "a59", "order": 0}, {"filmId": "334", "actorId": "a68", "order": 1}, {"filmId": "334", "actorId": "a69", "order": 2}, {"filmId": "881", "actorId": "a59", "order": 0}, {"filmId": "881", "actorId": "a70", "order": 1}, {"filmId": "881", "actorId": "a71", "order": 2}, {"filmId": "37233", "actorId": "a59", "order": 0}, {"filmId": "37233", "actorId": "a72", "order": 1}, {"filmId": "37233", "actorId": "a73", "order": 2}, {"filmId": "544", "actorId": "a67", "order": 0}, {"filmId": "544", "actorId": "a74", "order": 1}, {"filmId": "544", "actorId": "a75", "order": 2}, {"filmId": "1593", "actorId": "a75", "order": 0}, {"filmId": "1593", "actorId": "a76", "order": 1}, {"filmId": "1593", "actorId": "a77", "order": 2}, {"filmId": "1597", "actorId": "a75", "order": 0}, {"filmId": "1597", "actorId": "a78", "order": 1}, {"filmId": "1597", "actorId": "a79", "order": 2}, {"filmId": "693", "actorId": "a75", "order": 0}, {"filmId": "693", "actorId": "a78", "order": 1}, {"filmId": "693", "actorId": "a80", "order": 2}, {"filmId": "90", "actorId": "a81", "order": 0}, {"filmId": "90", "actorId": "a82", "order": 1}, {"filmId": "90", "actorId": "a83", "order": 2}, {"filmId": "9602", "actorId": "a81", "order": 0}, {"filmId": "9602", "actorId": "a84", "order": 1}, {"filmId": "9602", "actorId": "a85", "order": 2}, {"filmId": "1621", "actorId": "a86", "order": 0}, {"filmId": "1621", "actorId": "a81", "order": 1}, {"filmId": "1621", "actorId": "a87", "order": 2}, {"filmId": "105", "actorId": "a88", "order": 0}, {"filmId": "105", "actorId": "a89", "order": 1}, {"filmId": "105", "actorId": "a90", "order": 2}, {"filmId": "771", "actorId": "a91", "order": 0}, {"filmId": "771", "actorId": "a92", "order": 1}, {"filmId": "771", "actorId": "a93", "order": 2}, {"filmId": "772", "actorId": "a91", "order": 0}, {"filmId": "772", "actorId": "a92", "order": 1}, {"filmId": "772", "actorId": "a93", "order": 2}, {"filmId": "639", "actorId": "a94", "order": 0}, {"filmId": "639", "actorId": "a95", "order": 1}, {"filmId": "639", "actorId": "a96", "order": 2}, {"filmId": "858", "actorId": "a95", "order": 0}, {"filmId": "858", "actorId": "a2", "order": 1}, {"filmId": "858", "actorId": "a97", "order": 2}, {"filmId": "9489", "actorId": "a95", "order": 0}, {"filmId": "9489", "actorId": "a2", "order": 1}, {"filmId": "9489", "actorId": "a98", "order": 2}, {"filmId": "594", "actorId": "a2", "order": 0}, {"filmId": "594", "actorId": "a99", "order": 1}, {"filmId": "594", "actorId": "a100", "order": 2}, {"filmId": "8358", "actorId": "a2", "order": 0}, {"filmId": "8358", "actorId": "a101", "order": 1}, {"filmId": "8358", "actorId": "a102", "order": 2}, {"filmId": "497", "actorId": "a2", "order": 0}, {"filmId": "497", "actorId": "a103", "order": 1}, {"filmId": "497", "actorId": "a104", "order": 2}, {"filmId": "13", "actorId": "a2", "order": 0}, {"filmId": "13", "actorId": "a105", "order": 1}, {"filmId": "13", "actorId": "a106", "order": 2}, {"filmId": "9800", "actorId": "a2", "order": 0}, {"filmId": "9800", "actorId": "a107", "order": 1}, {"filmId": "9800", "actorId": "a108", "order": 2}, {"filmId": "857", "actorId": "a2", "order": 0}, {"filmId": "857", "actorId": "a109", "order": 1}, {"filmId": "857", "actorId": "a110", "order": 2}, {"filmId": "568", "actorId": "a2", "order": 0}, {"filmId": "568", "actorId": "a111", "order": 1}, {"filmId": "568", "actorId": "a112", "order": 2}, {"filmId": "1213", "actorId": "a45", "order": 0}, {"filmId": "1213", "actorId": "a35", "order": 1}, {"filmId": "1213", "actorId": "a113", "order": 2}, {"filmId": "22954", "actorId": "a34", "order": 0}, {"filmId": "22954", "actorId": "a45", "order": 1}, {"filmId": "22954", "actorId": "a114", "order": 2}, {"filmId": "2501", "actorId": "a45", "order": 0}, {"filmId": "2501", "actorId": "a115", "order": 1}, {"filmId": "2501", "actorId": "a116", "order": 2}, {"filmId": "70", "actorId": "a117", "order": 0}, {"filmId": "70", "actorId": "a118", "order": 1}, {"filmId": "70", "actorId": "a34", "order": 2}, {"filmId": "688", "actorId": "a119", "order": 0}, {"filmId": "688", "actorId": "a117", "order": 1}, {"filmId": "688", "actorId": "a120", "order": 2}, {"filmId": "13223", "actorId": "a117", "order": 0}, {"filmId": "13223", "actorId": "a121", "order": 1}, {"filmId": "13223", "actorId": "a122", "order": 2}, {"filmId": "190859", "actorId": "a123", "order": 0}, {"filmId": "190859", "actorId": "a124", "order": 1}, {"filmId": "190859", "actorId": "a125", "order": 2}, {"filmId": "278", "actorId": "a126", "order": 0}, {"filmId": "278", "actorId": "a34", "order": 1}, {"filmId": "278", "actorId": "a127", "order": 2}, {"filmId": "85", "actorId": "a128", "order": 0}, {"filmId": "85", "actorId": "a129", "order": 1}, {"filmId": "85", "actorId": "a130", "order": 2}, {"filmId": "207", "actorId": "a131", "order": 0}, {"filmId": "207", "actorId": "a132", "order": 1}, {"filmId": "207", "actorId": "a133", "order": 2}, {"filmId": "101", "actorId": "a134", "order": 0}, {"filmId": "101", "actorId": "a135", "order": 1}, {"filmId": "101", "actorId": "a136", "order": 2}, {"filmId": "9322", "actorId": "a137", "order": 0}, {"filmId": "9322", "actorId": "a138", "order": 1}, {"filmId": "9322", "actorId": "a139", "order": 2}, {"filmId": "175", "actorId": "a140", "order": 0}, {"filmId": "175", "actorId": "a134", "order": 1}, {"filmId": "175", "actorId": "a141", "order": 2}, {"filmId": "23830", "actorId": "a142", "order": 0}, {"filmId": "23830", "actorId": "a143", "order": 1}, {"filmId": "23830", "actorId": "a144", "order": 2}, {"filmId": "9377", "actorId": "a145", "order": 0}, {"filmId": "9377", "actorId": "a146", "order": 1}, {"filmId": "9377", "actorId": "a147", "order": 2}, {"filmId": "192", "actorId": "a148", "order": 0}, {"filmId": "192", "actorId": "a149", "order": 1}, {"filmId": "192", "actorId": "a150", "order": 2}], "film_directors": [{"filmId": "640", "directorId": "d1"}, {"filmId": "597", "directorId": "d2"}, {"filmId": "106646", "directorId": "d3"}, {"filmId": "27205", "directorId": "d4"}, {"filmId": "64682", "directorId": "d5"}, {"filmId": "11324", "directorId": "d3"}, {"filmId": "68718", "directorId": "d6"}, {"filmId": "1907", "directorId": "d7"}, {"filmId": "680", "directorId": "d6"}, {"filmId": "500", "directorId": "d6"}, {"filmId": "24", "directorId": "d6"}, {"filmId": "393", "directorId": "d6"}, {"filmId": "16869", "directorId": "d6"}, {"filmId": "550", "directorId": "d8"}, {"filmId": "297", "directorId": "d9"}, {"filmId": "807", "directorId": "d8"}, {"filmId": "2649", "directorId": "d8"}, {"filmId": "348", "directorId": "d10"}, {"filmId": "98", "directorId": "d10"}, {"filmId": "286217", "directorId": "d10"}, {"filmId": "274", "directorId": "d11"}, {"filmId": "4547", "directorId": "d8"}, {"filmId": "629", "directorId": "d12"}, {"filmId": "161", "directorId": "d13"}, {"filmId": "163", "directorId": "d13"}, {"filmId": "298", "directorId": "d13"}, {"filmId": "954", "directorId": "d14"}, {"filmId": "74", "directorId": "d1"}, {"filmId": "180", "directorId": "d1"}, {"filmId": "1903", "directorId": "d15"}, {"filmId": "334", "directorId": "d16"}, {"filmId": "881", "directorId": "d17"}, {"filmId": "37233", "directorId": "d18"}, {"filmId": "544", "directorId": "d19"}, {"filmId": "1593", "directorId": "d20"}, {"filmId": "1597", "directorId": "d21"}, {"filmId": "693", "directorId": "d21"}, {"filmId": "90", "directorId": "d9"}, {"filmId": "9602", "directorId": "d22"}, {"filmId": "1621", "directorId": "d22"}, {"filmId": "105", "directorId": "d23"}, {"filmId": "771", "directorId": "d24"}, {"filmId": "772", "directorId": "d24"}, {"filmId": "639", "directorId": "d17"}, {"filmId": "858", "directorId": "d25"}, {"filmId": "9489", "directorId": "d25"}, {"filmId": "594", "directorId": "d1"}, {"filmId": "8358", "directorId": "d23"}, {"filmId": "497", "directorId": "d26"}, {"filmId": "13", "directorId": "d23"}, {"filmId": "9800", "directorId": "d11"}, {"filmId": "857", "directorId": "d1"}, {"filmId": "568", "directorId": "d27"}, {"filmId": "1213", "directorId": "d28"}, {"filmId": "22954", "directorId": "d29"}, {"filmId": "2501", "directorId": "d30"}, {"filmId": "70", "directorId": "d29"}, {"filmId": "688", "directorId": "d29"}, {"filmId": "13223", "directorId": "d29"}, {"filmId": "190859", "directorId": "d29"}, {"filmId": "278", "directorId": "d26"}, {"filmId": "85", "directorId": "d1"}, {"filmId": "207", "directorId": "d31"}, {"filmId": "101", "directorId": "d32"}, {"filmId": "9322", "directorId": "d32"}, {"filmId": "175", "directorId": "d32"}, {"filmId": "23830", "directorId": "d33"}, {"filmId": "9377", "directorId": "d34"}, {"filmId": "192", "directorId": "d35"}]};
+  cache.genres = FALLBACK.genres;
+  cache.directors = FALLBACK.directors;
+  cache.actors = FALLBACK.actors;
+  cache.posters = FALLBACK.posters;
+  cache.film_genres = FALLBACK.film_genres;
+  cache.film_actors = FALLBACK.film_actors;
+  cache.film_directors = FALLBACK.film_directors;
+
+  cache.films = Object.values(FALLBACK.films).map(f => ({
+    ...f,
+    poster: FALLBACK.posters[f.id] || '',
+    genres: FALLBACK.film_genres.filter(fg=>fg.filmId===f.id).map(fg=>FALLBACK.genres[fg.genreId]).filter(Boolean),
+    director: (() => { const l = FALLBACK.film_directors.find(fd=>fd.filmId===f.id); return l ? FALLBACK.directors[l.directorId]||'' : ''; })(),
+    actors: FALLBACK.film_actors.filter(fa=>fa.filmId===f.id).sort((a,b)=>a.order-b.order).map(fa=>FALLBACK.actors[fa.actorId]).filter(Boolean),
+  }));
+  useSupabase = false;
+}
+
+// ── Write operations ──
+async function toggleSeen(filmId) {
+  const f = cache.films.find(x => x.id === filmId);
+  if (!f) return;
+  f.seen = !f.seen;
+
+  if (useSupabase) {
+    setDbStatus('saving');
+    const { error } = await sb.from('films').update({ seen: f.seen }).eq('id', filmId);
+    setDbStatus(error ? 'error' : 'ok');
+    if (error) showToast('Erreur sauvegarde', true);
+  }
+  renderGrid();
+  showToast(f.seen ? '✓ Marqué comme vu' : '○ Marqué comme non vu');
+}
+
+async function deleteFilm(filmId) {
+  if (!confirm('Supprimer ce film de la collection ?')) return;
+  const title = cache.films.find(x=>x.id===filmId)?.title || '';
+
+  if (useSupabase) {
+    setDbStatus('saving');
+    // CASCADE handles junction tables
+    const { error } = await sb.from('films').delete().eq('id', filmId);
+    // Also delete poster
+    await sb.from('posters').delete().eq('film_id', filmId);
+    setDbStatus(error ? 'error' : 'ok');
+    if (error) { showToast('Erreur suppression', true); return; }
+  }
+
+  cache.films = cache.films.filter(x => x.id !== filmId);
+  closeDetail();
+  buildFilters();
+  renderGrid();
+  showToast(`"${title}" supprimé`);
+}
+
+async function addFilmToDatabase(movie) {
+  // Check duplicate
+  if (cache.films.some(f => f.id === movie.id)) {
+    showToast('Ce film est déjà dans la collection !', true);
+    return;
+  }
+
+  if (useSupabase) {
+    setDbStatus('saving');
+    try {
+      // 1. Insert film
+      await sb.from('films').insert({ id: movie.id, title: movie.title, fr_title: movie.title, year: movie.year||'', overview: movie.overview||'', seen: false });
+
+      // 2. Insert poster
+      if (movie.poster) await sb.from('posters').upsert({ film_id: movie.id, url: movie.poster });
+
+      // 3. Genres — upsert each, then link
+      for (const gName of (movie.genres||[])) {
+        let gid = Object.entries(cache.genres).find(([k,v]) => v.toLowerCase()===gName.toLowerCase())?.[0];
+        if (!gid) {
+          gid = 'g' + Date.now() + Math.random().toString(36).slice(2,5);
+          await sb.from('genres').insert({ id: gid, name: gName });
+          cache.genres[gid] = gName;
+        }
+        await sb.from('film_genres').insert({ film_id: movie.id, genre_id: gid }).single();
+      }
+
+      // 4. Director
+      if (movie.director) {
+        let did = Object.entries(cache.directors).find(([k,v]) => v.toLowerCase()===movie.director.toLowerCase())?.[0];
+        if (!did) {
+          did = 'd' + Date.now() + Math.random().toString(36).slice(2,5);
+          await sb.from('directors').insert({ id: did, name: movie.director });
+          cache.directors[did] = movie.director;
+        }
+        await sb.from('film_directors').insert({ film_id: movie.id, director_id: did });
+      }
+
+      // 5. Actors
+      for (let i = 0; i < (movie.actors||[]).length; i++) {
+        const aName = movie.actors[i];
+        let aid = Object.entries(cache.actors).find(([k,v]) => v.toLowerCase()===aName.toLowerCase())?.[0];
+        if (!aid) {
+          aid = 'a' + Date.now() + Math.random().toString(36).slice(2,5);
+          await sb.from('actors').insert({ id: aid, name: aName });
+          cache.actors[aid] = aName;
+        }
+        await sb.from('film_actors').insert({ film_id: movie.id, actor_id: aid, cast_order: i });
+      }
+
+      setDbStatus('ok');
+    } catch (e) {
+      console.error('Insert error:', e);
+      setDbStatus('error');
+      showToast('Erreur lors de l'ajout', true);
+      return;
+    }
+  }
+
+  // Update local cache
+  cache.films.push({
+    id: movie.id, title: movie.title, fr_title: movie.title,
+    year: movie.year||'', overview: movie.overview||'', seen: false,
+    poster: movie.poster||'', genres: movie.genres||[],
+    director: movie.director||'', actors: movie.actors||[]
+  });
+
+  closeAddModal();
+  buildFilters();
+  renderGrid();
+  showToast(`"${movie.title}" ajouté !`);
+}
+
+// ═══════════════════════════════
+// UI LAYER
+// ═══════════════════════════════
+let activeGenres = new Set(), activeDirectors = new Set(), activeActors = new Set();
+let seenMode = 'all';
+
+function buildFilters() {
+  const gSet = new Set(), dSet = new Set(), aSet = new Set();
+  cache.films.forEach(f => {
+    f.genres.forEach(g => gSet.add(g));
+    if (f.director) dSet.add(f.director);
+    f.actors.forEach(a => aSet.add(a));
+  });
+  const makeTag = (set, active, type) => [...set].sort((a,b)=>a.localeCompare(b,'fr')).map(v =>
+    `<span class="filter-tag${active.has(v)?' selected':''}" data-type="${type}" data-val="${v}">${v}</span>`
+  ).join('');
+  document.getElementById('genreFilters').innerHTML = makeTag(gSet, activeGenres, 'genre');
+  document.getElementById('directorFilters').innerHTML = makeTag(dSet, activeDirectors, 'director');
+  document.getElementById('actorFilters').innerHTML = makeTag(aSet, activeActors, 'actor');
+  document.querySelectorAll('.filter-tag').forEach(tag => {
+    tag.onclick = () => {
+      const s = tag.dataset.type==='genre'?activeGenres:tag.dataset.type==='director'?activeDirectors:activeActors;
+      s.has(tag.dataset.val)?s.delete(tag.dataset.val):s.add(tag.dataset.val);
+      tag.classList.toggle('selected');
+      updateFilterCount();renderGrid();
+    };
+  });
+}
+
+function updateFilterCount() {
+  const c = activeGenres.size+activeDirectors.size+activeActors.size;
+  document.getElementById('filterCount').textContent = c;
+  document.getElementById('toggleFilters').classList.toggle('active', c>0);
+}
+
+function renderGrid() {
+  const q = document.getElementById('searchInput').value.toLowerCase().trim();
+  const sort = document.getElementById('sortSelect').value;
+  let films = [...cache.films];
+
+  films = films.filter(f => {
+    if (q) { const s = [f.title,f.fr_title,f.director,f.year,...f.actors,...f.genres,f.overview].filter(Boolean).join(' ').toLowerCase(); if(!s.includes(q))return false; }
+    if (activeGenres.size && !f.genres.some(g=>activeGenres.has(g))) return false;
+    if (activeDirectors.size && !activeDirectors.has(f.director)) return false;
+    if (activeActors.size && !f.actors.some(a=>activeActors.has(a))) return false;
+    if (seenMode==='seen' && !f.seen) return false;
+    if (seenMode==='unseen' && f.seen) return false;
+    return true;
+  });
+
+  films.sort((a,b) => {
+    switch(sort) {
+      case 'alpha': return (a.title||'').localeCompare(b.title||'','fr');
+      case 'alpha-desc': return (b.title||'').localeCompare(a.title||'','fr');
+      case 'year-desc': return (parseInt(b.year)||0)-(parseInt(a.year)||0);
+      case 'year-asc': return (parseInt(a.year)||0)-(parseInt(b.year)||0);
+      case 'director': return (a.director||'').localeCompare(b.director||'','fr');
+    }
+  });
+
+  const grid = document.getElementById('filmGrid');
+  const empty = document.getElementById('emptyState');
+  if (!films.length){grid.innerHTML='';empty.style.display='block';return;}
+  empty.style.display='none';
+
+  grid.innerHTML = films.map(f => `
+    <div class="card${f.seen?' seen':''}" onclick="openDetail('${f.id}')">
+      <div class="seen-badge">✓</div>
+      ${f.poster?`<img class="card-poster" src="${f.poster}" alt="${f.title}" loading="lazy" onerror="this.outerHTML='<div class=no-poster>🎬</div>'">`:'<div class="no-poster">🎬</div>'}
+      <div class="card-body">
+        <div class="card-title">${f.title}</div>
+        <div class="card-year">${f.year}</div>
+        <div class="card-director">Réal. <span>${f.director||'Inconnu'}</span></div>
+        <div class="card-actors">${f.actors.slice(0,3).join(', ')}</div>
+        <div class="card-genres">${f.genres.slice(0,3).map(g=>`<span class="card-genre">${g}</span>`).join('')}</div>
+      </div>
+    </div>
+  `).join('');
+  updateStats();
+}
+
+function updateStats() {
+  const seen = cache.films.filter(f=>f.seen).length;
+  document.getElementById('totalCount').textContent = cache.films.length;
+  document.getElementById('seenCount').textContent = seen;
+  document.getElementById('unseenCount').textContent = cache.films.length - seen;
+  const dirs = new Set(cache.films.map(f=>f.director).filter(Boolean));
+  document.getElementById('directorCount').textContent = dirs.size;
+  const mode = useSupabase ? 'Supabase' : 'Local';
+  document.getElementById('dbTablesInfo').innerHTML = [
+    `Mode: ${mode}`, `Films: ${cache.films.length}`,
+    `Genres: ${new Set(cache.films.flatMap(f=>f.genres)).size}`,
+    `Réalisateurs: ${dirs.size}`,
+    `Acteurs: ${new Set(cache.films.flatMap(f=>f.actors)).size}`,
+  ].map(t=>`<span class="db-table-badge">${t}</span>`).join('');
+}
+
+// ── Detail ──
+function openDetail(id) {
+  const f = cache.films.find(x=>x.id===id);
+  if(!f)return;
+  document.getElementById('modalContent').innerHTML = `
+    <div class="modal-header">
+      ${f.poster?`<img class="modal-poster" src="${f.poster}" alt="${f.title}">`:'<div class="modal-poster" style="width:160px;aspect-ratio:2/3;background:#1a1a25;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:3rem">🎬</div>'}
+      <div class="modal-info">
+        <h2>${f.title}</h2>
+        <div class="meta">${f.year?`<span>${f.year}</span>`:''} ${f.director?` · Réalisé par <span>${f.director}</span>`:''}</div>
+        <div class="modal-genres-list">${f.genres.map(g=>`<span class="modal-genre-tag">${g}</span>`).join('')}</div>
+        <div class="modal-actions">
+          <button class="btn-seen ${f.seen?'already-seen':'not-seen'}" onclick="doToggleSeen('${id}')">${f.seen?'✓ Déjà vu':'Marquer comme vu'}</button>
+          <button class="btn-delete" onclick="deleteFilm('${id}')">Supprimer</button>
+          <button class="btn-close" onclick="closeDetail()">Fermer</button>
+        </div>
+      </div>
+    </div>
+    <div class="modal-body">
+      ${f.overview?`<h3>Synopsis</h3><p class="modal-overview">${f.overview}</p>`:''}
+      ${f.actors.length?`<h3>Acteurs principaux</h3><div class="modal-cast">${f.actors.map(a=>`<div class="modal-cast-item">${a}</div>`).join('')}</div>`:''}
+    </div>`;
+  document.getElementById('detailModal').classList.add('open');
+  document.body.style.overflow='hidden';
+}
+function closeDetail(){document.getElementById('detailModal').classList.remove('open');document.body.style.overflow=''}
+async function doToggleSeen(id){await toggleSeen(id);openDetail(id);}
+
+// ── Add Modal + TMDB search ──
+let tmdbTimer = null;
+function openAddModal(){document.getElementById('addModal').classList.add('open');document.body.style.overflow='hidden';document.getElementById('tmdbSearchInput').value='';document.getElementById('tmdbResults').innerHTML='';document.getElementById('manualFields').classList.remove('open');setTimeout(()=>document.getElementById('tmdbSearchInput').focus(),100)}
+function closeAddModal(){document.getElementById('addModal').classList.remove('open');document.body.style.overflow=''}
+
+document.getElementById('tmdbSearchInput').addEventListener('input', function(){
+  clearTimeout(tmdbTimer);
+  const q = this.value.trim();
+  if(q.length<2){document.getElementById('tmdbResults').innerHTML='';return;}
+  document.getElementById('tmdbResults').innerHTML='<div class="tmdb-searching"><span class="mini-spin"></span> Recherche TMDB…</div>';
+  tmdbTimer = setTimeout(()=>searchTMDB(q), 600);
+});
+
+async function searchTMDB(query) {
+  const el = document.getElementById('tmdbResults');
+  try {
+    const r = await fetch(`https://www.themoviedb.org/search/movie?query=${encodeURIComponent(query)}&language=fr`);
+    const html = await r.text();
+    const ids = [...new Set([...html.matchAll(/href="\/movie\/(\d+)-/g)].map(m=>m[1]))].slice(0,5);
+    if(!ids.length){el.innerHTML='<div class="tmdb-searching">Aucun résultat</div>';return;}
+    el.innerHTML='<div class="tmdb-searching"><span class="mini-spin"></span> Chargement…</div>';
+    const movies = (await Promise.all(ids.map(async id=>{
+      try{
+        const r2=await fetch(`https://www.themoviedb.org/movie/${id}?language=fr-FR`);
+        const h2=await r2.text();
+        return parseTMDB(h2,id);
+      }catch{return null;}
+    }))).filter(Boolean);
+    if(!movies.length){el.innerHTML='<div class="tmdb-searching">Aucun résultat exploitable</div>';return;}
+    el.innerHTML=movies.map(m=>`
+      <div class="tmdb-result" onclick='selectTMDB(${JSON.stringify(m).replace(/'/g,"&#39;")})'>
+        ${m.poster?`<img src="${m.poster.replace('/w500/','/w92/')}">`:'<div style="width:55px;height:82px;background:#1a1a25;border-radius:4px;display:flex;align-items:center;justify-content:center">🎬</div>'}
+        <div class="info"><h4>${m.title}</h4><p><span class="yr">${m.year}</span> · ${m.director||'?'}</p><p>${m.genres.slice(0,3).join(', ')}</p><p>${m.actors.slice(0,3).join(', ')}</p></div>
+      </div>`).join('');
+  }catch(e){console.error(e);el.innerHTML='<div class="tmdb-searching">Erreur. Essayez la saisie manuelle.</div>';}
+}
+
+function parseTMDB(html, id) {
+  const doc = new DOMParser().parseFromString(html,'text/html');
+  let title = doc.querySelector('h2')?.textContent.trim().replace(/\(\d{4}\)$/,'').trim()||'';
+  let year = doc.querySelector('.release')?.textContent.match(/(\d{4})/)?.[1]||'';
+  let overview = doc.querySelector('.overview p')?.textContent.trim()||'';
+  let poster = ''; const pm=html.match(/\/t\/p\/w\d+(\/[^"']+\.jpg)/); if(pm) poster='https://image.tmdb.org/t/p/w500'+pm[1];
+  const genres = [...doc.querySelectorAll('span.genres a')].map(g=>g.textContent.trim());
+  let director=''; doc.querySelectorAll('.people.no_image .profile').forEach(item=>{const c=item.querySelector('.character');if(c&&(c.textContent.includes('Réalisat')||c.textContent.includes('Direct'))){const a=item.querySelector('a');if(a)director=a.textContent.trim();}});
+  const actors=[...doc.querySelectorAll('.people.scroller .card')].slice(0,3).map(c=>{const a=c.querySelector('p a');return a?a.textContent.trim():'';}).filter(Boolean);
+  return{id:id.toString(),title,year,overview,poster,genres,director,actors};
+}
+
+async function selectTMDB(movie){await addFilmToDatabase(movie);}
+
+document.getElementById('manualToggle').onclick=()=>document.getElementById('manualFields').classList.toggle('open');
+document.getElementById('confirmManualAdd').onclick=async()=>{
+  const title=document.getElementById('addTitle').value.trim();
+  if(!title){showToast('Titre requis',true);return;}
+  await addFilmToDatabase({
+    id:'m'+Date.now(), title,
+    year:document.getElementById('addYear').value.trim(),
+    overview:document.getElementById('addOverview').value.trim(),
+    poster:document.getElementById('addPoster').value.trim(),
+    genres:document.getElementById('addGenres').value.split(',').map(s=>s.trim()).filter(Boolean),
+    director:document.getElementById('addDirector').value.trim(),
+    actors:document.getElementById('addActors').value.split(',').map(s=>s.trim()).filter(Boolean),
+  });
+};
+
+// ── Events ──
+document.getElementById('searchInput').addEventListener('input',renderGrid);
+document.getElementById('sortSelect').addEventListener('change',renderGrid);
+document.getElementById('toggleFilters').onclick=()=>document.getElementById('filterPanel').classList.toggle('open');
+document.getElementById('btnSeenFilter').onclick=function(){
+  if(seenMode==='all'){seenMode='seen';this.textContent='✓ Vus';this.classList.add('active')}
+  else if(seenMode==='seen'){seenMode='unseen';this.textContent='○ À voir';this.classList.add('active')}
+  else{seenMode='all';this.textContent='Tous';this.classList.remove('active')}
+  renderGrid();
+};
+document.getElementById('clearFilters').onclick=()=>{activeGenres.clear();activeDirectors.clear();activeActors.clear();document.querySelectorAll('.filter-tag.selected').forEach(t=>t.classList.remove('selected'));updateFilterCount();renderGrid();};
+document.getElementById('addFilmBtn').onclick=openAddModal;
+document.getElementById('cancelAdd').onclick=closeAddModal;
+document.getElementById('detailModal').onclick=e=>{if(e.target.id==='detailModal')closeDetail()};
+document.getElementById('addModal').onclick=e=>{if(e.target.id==='addModal')closeAddModal()};
+document.addEventListener('keydown',e=>{if(e.key==='Escape'){closeDetail();closeAddModal();}});
+
+// ── INIT ──
+(async()=>{
+  await loadAllData();
+  buildFilters();
+  renderGrid();
+  document.getElementById('loadingScreen').classList.add('hidden');
+  setTimeout(()=>document.getElementById('loadingScreen').style.display='none',600);
+})();
+</script>
+</body>
+</html>
